@@ -11,6 +11,6 @@ input_lwdown_prefix = "./global_data/5arcmin/forcing/lwdown/lwdown_WFDE5_v2.0_5a
 output_dir = "./output/"
 output_file_prefix = "precipitation_scaled_"
 
-#Define start- and end-year
+# Define start and end year
 start_year = 1979
 end_year = 2019

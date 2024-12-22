@@ -36,7 +36,7 @@ end
 module PhysicsFunctions
 
     # Vapor Pressure Deficit Calculation
-    function calculate_vpd_gpu(tair::CuArray{Float64}, vp::CuArray{Float32})
+    function calculate_vpd_gpu(tair::CuArray{Float32}, vp::CuArray{Float32})
         svp = svp_a .* exp.((svp_b .* tair) ./ (svp_c .+ tair))
         svp = ifelse.(tair .< 0, svp .* (1.0 .+ 0.00972 .* tair .+ 0.000042 .* tair.^2), svp)
         vpd = svp .- vp
