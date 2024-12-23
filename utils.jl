@@ -1,7 +1,7 @@
 # Asynchronously compresses a NetCDF file using `nccopy`, offloading compression to the shell for efficiency.
 # Accepts `output_file` and `compression_level` (1 = fast/light, 9 = slow/max).
 function compress_file_async(output_file::String, compression_level::Int)
-    println("Compressing file $output_file asynchronously with compression level $compression_level...")
+    println("Attempting compression of file $output_file asynchronously with compression level $compression_level...")
 
     # Construct the shell command as a string
     command = """

@@ -4,21 +4,11 @@ if !isdir(output_dir)
     mkpath(output_dir)
 end
 
-# Helper function to read a NetCDF variable, trying subsequent years if not found
+# Helper function to read a NetCDF variable
 function read_netcdf_variable(prefix, year, variable_name)
-    current_year = year
-    while current_year <= end_year
-        file_path = "$(prefix)$(current_year).nc"
-        if isfile(file_path)
-            println("Found file for year $current_year: $file_path")
-            dataset = NCDataset(file_path, "r")
-            return dataset, dataset[variable_name]  # Return both the dataset and the variable
-        else
-            println("File not found for year $current_year. Trying next year...")
-            current_year += 1
-        end
-    end
-    error("No valid file found for variable '$variable_name' from year $year to $end_year.")
+    file_path = "$(prefix)$(year).nc"
+    dataset = NCDataset(file_path, "r")
+    return dataset, dataset[variable_name]  # Return both the dataset and the variable
 end
 
 # Helper function: reads a single netCDF variable and allocates a GPU array
