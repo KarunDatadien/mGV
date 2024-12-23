@@ -49,7 +49,7 @@ for year in start_year:end_year
     close(d_lwdown)
     close(out_ds)
 
-    # Compress the output file to level 1 compression
+    # Compress the output file to level 1 compression as a background process
     compress_file_async(output_file, 1)
     
     println("Completed processing for year: $year\n")
