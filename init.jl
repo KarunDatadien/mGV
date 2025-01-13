@@ -30,9 +30,9 @@ if CASE == "global"
     output_dir             = "./output/"
     output_file_prefix     = "outputfile_global_"
     
-    # Simulation period
-    start_year             = start_year_arg !== nothing ? start_year_arg : 1979
-    end_year               = end_year_arg !== nothing ? end_year_arg : 2019
+    # Set default simulation years if no command-line arguments are provided
+    start_year             = start_year_arg == nothing ? 1979 : start_year_arg
+    end_year               = end_year_arg   == nothing ? 2019 : end_year_arg
     
     # ========================= END GLOBAL CONFIGURATION ==========================
 
@@ -51,10 +51,10 @@ elseif CASE == "indus"
     output_dir             = "./output/"
     output_file_prefix     = "outputfile_indus_"
     
-    # Simulation period
-    start_year             = start_year_arg !== nothing ? start_year_arg : 1979
-    end_year               = end_year_arg !== nothing ? end_year_arg : 2019
-  
+    # Set default simulation years if no command-line arguments are provided
+    start_year             = start_year_arg == nothing ? 1979 : start_year_arg
+    end_year               = end_year_arg   == nothing ? 2019 : end_year_arg
+    
     # ========================== END INDUS CONFIGURATION ==========================
 
     println("Running from year $start_year to year $end_year.")
