@@ -26,7 +26,7 @@ if CASE == "global"
     input_swdown_prefix    = "./global_data/5arcmin/forcing/swdown/swdown_WFDE5_v2.0_5arcmin_"
     input_lwdown_prefix    = "./global_data/5arcmin/forcing/lwdown/lwdown_WFDE5_v2.0_5arcmin_"
     
-    # Input variable names (as named in the input files)
+    # Input variable names (as specified in the input files' metadata)
     prec_var = "prec"
     tair_var = "tair"
     wind_var = "wind" 
@@ -62,7 +62,7 @@ elseif CASE == "indus"
     input_lwdown_prefix    = "./indus_data/lwdown_daily_GFDL-ESM4adj_historical/lwdown_daily_GFDL-ESM4adj_historical_"
     # input_psurf_prefix     = "./indus_data/psurf_daily_GFDL-ESM4_historical/psurf_daily_GFDL-ESM4_historical_"
     
-    # Input variable names (as named in the input files)
+    # Input variable names (as specified in the input files' metadata)
     prec_var = "pr"
     tair_var = "tas"
     wind_var = "wind10" 

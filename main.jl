@@ -19,9 +19,9 @@ for year in start_year:end_year
  
     # Clean and convert CPU data for all variables
     @time prec_cpu_cleaned = Float64.(replace(prec[:, :, :], missing => NaN))
-    @time tair_cpu_cleaned          = Float64.(replace(tair[:, :, :], missing => NaN))
+    @time tair_cpu_cleaned = Float64.(replace(tair[:, :, :], missing => NaN))
 
-    # Create the output NetCDF (partly) using a reference array's shape
+    # Create the output NetCDF by (partly) using a reference array's shape
     out_ds, prec_scaled, tair_scaled = create_output_netcdf(output_file, prec)
 
     # Specify number of days in the current year
@@ -36,7 +36,7 @@ for year in start_year:end_year
         apply_gpu_transformations!(prec_gpu, tair_gpu, 50)
 
         # Write results directly to the NetCDF file from the GPU
-        prec_scaled[:, :, day]   = Array(prec_gpu)
+        prec_scaled[:, :, day] = Array(prec_gpu)
         tair_scaled[:, :, day] = Array(tair_gpu)
     end
 
@@ -48,7 +48,6 @@ for year in start_year:end_year
     close(d_swdown)
     close(d_lwdown)
     close(out_ds)
-
 
     println("Completed processing for year: $year\n")
 
