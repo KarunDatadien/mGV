@@ -31,8 +31,8 @@ if CASE == "global"
     output_file_prefix     = "outputfile_global_"
     
     # Set default simulation years if no command-line arguments are provided
-    start_year             = start_year_arg == nothing ? 1979 : start_year_arg
-    end_year               = end_year_arg   == nothing ? 2019 : end_year_arg
+    start_year             = isnothing(start_year_arg) ? 1979 : start_year_arg
+    end_year               = isnothing(end_year_arg)   ? 2019 : end_year_arg
     
     # ========================= END GLOBAL CONFIGURATION ==========================
 
@@ -43,17 +43,24 @@ elseif CASE == "indus"
     println("Loading configuration for 'indus'...")
     
     # ============================ INDUS CONFIGURATION ============================
-        
-    # Input file paths/names (To be defined)
-    # TODO: ADD appropriate paths here
+   
+    # Input file paths/names
+    input_param_file       = "./indus_data/domain_Indus.nc"
+    input_precip_prefix    = "./indus_data/pr_daily_GFDL-ESM4adj_historical/pr_daily_GFDL-ESM4adj_historical_"
+    input_tair_prefix      = "./indus_data/tas_daily_GFDL-ESM4adj_historical/tas_daily_GFDL-ESM4adj_historical_"
+    input_wind_prefix      = "./indus_data/wind10_daily_GFDL-ESM4_historical/wind10_daily_GFDL-ESM4_historical_"
+    input_vp_prefix        = "./indus_data/vp_daily_GFDL-ESM4_historical/vp_daily_GFDL-ESM4_historical_"
+    input_swdown_prefix    = "./indus_data/swdown_daily_GFDL-ESM4adj_historical/swdown_daily_GFDL-ESM4adj_historical_"
+    input_lwdown_prefix    = "./indus_data/lwdown_daily_GFDL-ESM4adj_historical/lwdown_daily_GFDL-ESM4adj_historical_"
+    input_psurf_prefix     = "./indus_data/psurf_daily_GFDL-ESM4_historical/psurf_daily_GFDL-ESM4_historical_"
     
     # Output file paths/names
-    output_dir             = "./output/"
+    output_dir             = "./output_indus/"
     output_file_prefix     = "outputfile_indus_"
     
     # Set default simulation years if no command-line arguments are provided
-    start_year             = start_year_arg == nothing ? 1979 : start_year_arg
-    end_year               = end_year_arg   == nothing ? 2019 : end_year_arg
+    start_year             = isnothing(start_year_arg) ? 1979 : start_year_arg
+    end_year               = isnothing(end_year_arg)   ? 2010 : end_year_arg
     
     # ========================== END INDUS CONFIGURATION ==========================
 

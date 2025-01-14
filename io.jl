@@ -30,12 +30,12 @@ function create_output_netcdf(output_file::String, reference_array)
     # Define the variables to be written
     pr_scaled = defVar(out_ds, "scaled_precipitation", Float32, ("lon", "lat", "time"),
                        deflatelevel = 0, # Compression done afterwards with compress_file_async
-                       chunksizes   = (512, 512, 1),
+                       chunksizes   = (64, 64, 1),
                        fillvalue    = -9999.0f0)
 
     tair_scaled = defVar(out_ds, "scaled_tair", Float32, ("lon", "lat", "time"),
                          deflatelevel = 0, # Compression done afterwards with compress_file_async
-                         chunksizes   = (512, 512, 1),
+                         chunksizes   = (64, 64, 1),
                          fillvalue    = -9999.0f0)
 
     # Set attributes                     
