@@ -18,11 +18,11 @@ for year in start_year:end_year
     (d_lwdown,  lwdown,    lwdown_gpu)         = read_and_allocate(input_lwdown_prefix,  year, lwdown_var)
  
     # Clean and convert CPU data for all variables
-    @time precipitation_cpu_cleaned = Float64.(replace(prec[:, :, :], missing => NaN))
+    @time prec_cpu_cleaned = Float64.(replace(prec[:, :, :], missing => NaN))
     @time tair_cpu_cleaned          = Float64.(replace(tair[:, :, :], missing => NaN))
 
     # Create the output NetCDF (partly) using a reference array's shape
-    out_ds, pr_scaled, tair_scaled = create_output_netcdf(output_file, prec)
+    out_ds, prec_scaled, tair_scaled = create_output_netcdf(output_file, prec)
 
     # Specify number of days in the current year
     num_days = size(prec, 3)
@@ -30,13 +30,13 @@ for year in start_year:end_year
     # Process and write data one day at a time
     @showprogress "Processing year $year (GPU)..." for day in 1:num_days
         # Explicitly copy the cleaned data to the GPU
-        CUDA.copyto!(precipitation_gpu, precipitation_cpu_cleaned[:, :, day])
+        CUDA.copyto!(prec_gpu, prec_cpu_cleaned[:, :, day])
         CUDA.copyto!(tair_gpu, tair_cpu_cleaned[:, :, day]) 
 
-        apply_gpu_transformations!(precipitation_gpu, tair_gpu, 50)
+        apply_gpu_transformations!(prec_gpu, tair_gpu, 50)
 
         # Write results directly to the NetCDF file from the GPU
-        pr_scaled[:, :, day]   = Array(precipitation_gpu)
+        prec_scaled[:, :, day]   = Array(prec_gpu)
         tair_scaled[:, :, day] = Array(tair_gpu)
     end
 
