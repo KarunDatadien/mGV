@@ -10,22 +10,22 @@ for year in start_year:end_year
     output_file = joinpath(output_dir, "$(output_file_prefix)$(year).nc")
 
     # Read input variables and allocate GPU arrays
-    (d_prec,    precipitation, precipitation_gpu)  = read_and_allocate(input_precip_prefix,  year, "prec")
-    (d_tair,    tair,          tair_gpu)           = read_and_allocate(input_tair_prefix,    year, "tair")
-    (d_wind,    wind,          wind_gpu)           = read_and_allocate(input_wind_prefix,    year, "wind")
-    (d_vp,      vp,            vp_gpu)             = read_and_allocate(input_vp_prefix,      year, "vp")
-    (d_swdown,  swdown,        swdown_gpu)         = read_and_allocate(input_swdown_prefix,  year, "swdown")
-    (d_lwdown,  lwdown,        lwdown_gpu)         = read_and_allocate(input_lwdown_prefix,  year, "lwdown")
+    (d_prec,    prec,      prec_gpu)           = read_and_allocate(input_prec_prefix,    year, prec_var)
+    (d_tair,    tair,      tair_gpu)           = read_and_allocate(input_tair_prefix,    year, tair_var)
+    (d_wind,    wind,      wind_gpu)           = read_and_allocate(input_wind_prefix,    year, wind_var)
+    (d_vp,      vp,        vp_gpu)             = read_and_allocate(input_vp_prefix,      year, vp_var)
+    (d_swdown,  swdown,    swdown_gpu)         = read_and_allocate(input_swdown_prefix,  year, swdown_var)
+    (d_lwdown,  lwdown,    lwdown_gpu)         = read_and_allocate(input_lwdown_prefix,  year, lwdown_var)
  
     # Clean and convert CPU data for all variables
-    @time precipitation_cpu_cleaned = Float64.(replace(precipitation[:, :, :], missing => NaN))
-    @time tair_cpu_cleaned          = Float64.(replace(tair[:, :, :],          missing => NaN))
+    @time precipitation_cpu_cleaned = Float64.(replace(prec[:, :, :], missing => NaN))
+    @time tair_cpu_cleaned          = Float64.(replace(tair[:, :, :], missing => NaN))
 
     # Create the output NetCDF (partly) using a reference array's shape
-    out_ds, pr_scaled, tair_scaled = create_output_netcdf(output_file, precipitation)
+    out_ds, pr_scaled, tair_scaled = create_output_netcdf(output_file, prec)
 
     # Specify number of days in the current year
-    num_days = size(precipitation, 3)
+    num_days = size(prec, 3)
 
     # Process and write data one day at a time
     @showprogress "Processing year $year (GPU)..." for day in 1:num_days
@@ -49,10 +49,11 @@ for year in start_year:end_year
     close(d_lwdown)
     close(out_ds)
 
-    # Compress the output file to level 1 compression as a background process
-    compress_file_async(output_file, 1)
-    
+
     println("Completed processing for year: $year\n")
+
+    # Compress the output file to level 1 compression as a background process
+    compress_file_async(output_file, 1)    
 end
 
 println("Done!")
