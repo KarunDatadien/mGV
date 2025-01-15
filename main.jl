@@ -24,14 +24,14 @@ for year in start_year:end_year
     # Create the output NetCDF by (partly) using a reference array's shape
     out_ds, prec_scaled, tair_scaled = create_output_netcdf(output_file, prec)
 
-    # Specify number of days in the current year
+    # Set number of days in the current year
     num_days = size(prec, 3)
 
     # Process and write data one day at a time
     @showprogress "Processing year $year (GPU)..." for day in 1:num_days
         # Explicitly copy the cleaned data to the GPU
         CUDA.copyto!(prec_gpu, prec_cpu_cleaned[:, :, day])
-        CUDA.copyto!(tair_gpu, tair_cpu_cleaned[:, :, day]) 
+        CUDA.copyto!(tair_gpu, tair_cpu_cleaned[:, :, day])
 
         apply_gpu_transformations!(prec_gpu, tair_gpu, 50)
 
@@ -41,18 +41,15 @@ for year in start_year:end_year
     end
 
     # Close datasets
-    close(d_prec)
-    close(d_tair)
-    close(d_wind)
-    close(d_vp)
-    close(d_swdown)
-    close(d_lwdown)
-    close(out_ds)
+    for ds in [d_prec, d_tair, d_wind, d_vp, d_swdown, d_lwdown, out_ds]
+        close(ds)
+    end
 
     println("Completed processing for year: $year\n")
 
     # Compress the output file to level 1 compression as a background process
     compress_file_async(output_file, 1)    
+
 end
 
 println("Done!")
