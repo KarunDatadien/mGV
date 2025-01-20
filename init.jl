@@ -44,7 +44,7 @@ if CASE == "global"
     
     # ========================= END GLOBAL CONFIGURATION ==========================
 
-    println("Running from year $start_year to year $end_year.")
+    println("Running from year $start_year to year $end_year.\n")
 
 elseif CASE == "indus"
 
@@ -80,7 +80,7 @@ elseif CASE == "indus"
     
     # ========================== END INDUS CONFIGURATION ==========================
 
-    println("Running from year $start_year to year $end_year.")
+    println("Running from year $start_year to year $end_year. \n")
 
 else
     error("Unknown CASE: '$CASE'. Please provide 'global' or 'indus' (or any other case defined in init.jl) as the first argument.")

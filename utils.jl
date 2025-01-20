@@ -3,7 +3,8 @@
 function compress_file_async(output_file::String, compression_level::Int)
     # Check if `nccopy` is available
     try
-        run(`which nccopy`)
+        nccopy_path = read(`which nccopy`, String) |> strip
+        println("Using nccopy for NetCDF file compression: $nccopy_path")
     catch 
         println("""
         WARNING: Output file compression will not occur because the `nccopy` command is not available on your system.
@@ -22,7 +23,7 @@ function compress_file_async(output_file::String, compression_level::Int)
     # Run the detached shell command
     try
         run(`sh -c $command`)
-        println("Compression process for $output_file started in the background.")
+        println("Compression process for $output_file started in the background.\n")
     catch err
         println("Failed to start compression for $output_file: $err")
     end
