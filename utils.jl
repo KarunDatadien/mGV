@@ -1,3 +1,38 @@
+"""
+    check_and_set_gpu_usage()
+
+Checks whether the system can run on an NVIDIA GPU via CUDA. 
+If CUDA is available, sets `GPU_USE` to true; otherwise sets it to false. 
+Also prints a message indicating which mode is in use.
+"""
+function check_and_set_gpu_usage()
+    if CUDA.has_cuda()
+        global GPU_USE = true
+        device = CUDA.device()
+        println("CUDA is available. Using GPU (Device Name: ", CUDA.name(device), ").")
+    else
+        global GPU_USE = false
+        println("CUDA is not available. Using CPU.")
+    end
+end
+
+function parse_case_args()
+    # Use the first argument in ARGS as the CASE, defaulting to "global" if not provided
+    local_case = length(ARGS) > 0 ? ARGS[1] : "global"
+    
+    # Notify the user if defaulting to "global"
+    if length(ARGS) == 0
+        println("No CASE provided. Defaulting to 'global'.")
+    end
+    
+    # Parse optional start and end year from ARGS
+    local_start_year_arg = length(ARGS) > 1 ? parse(Int, ARGS[2]) : nothing
+    local_end_year_arg   = length(ARGS) > 2 ? parse(Int, ARGS[3]) : nothing
+    
+    return local_case, local_start_year_arg, local_end_year_arg
+end
+
+
 # Asynchronously compresses a NetCDF file using `nccopy`, offloading compression to the shell for efficiency.
 # Accepts `output_file` and `compression_level` (1 = fast/light, 9 = slow/max).
 function compress_file_async(output_file::String, compression_level::Int)
@@ -28,3 +63,4 @@ function compress_file_async(output_file::String, compression_level::Int)
         println("Failed to start compression for $output_file: $err")
     end
 end
+

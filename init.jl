@@ -1,14 +1,5 @@
-# Use the first argument in ARGS as the CASE, defaulting to "global" if not provided
-const CASE = length(ARGS) > 0 ? ARGS[1] : "global"
-
-# Notify the user if defaulting to "global"
-if length(ARGS) == 0
-    println("No CASE provided. Defaulting to 'global'.")
-end
-
-# Parse optional start and end year from ARGS
-const start_year_arg = length(ARGS) > 1 ? parse(Int, ARGS[2]) : nothing
-const end_year_arg   = length(ARGS) > 2 ? parse(Int, ARGS[3]) : nothing
+CASE, start_year_arg, end_year_arg = parse_case_args()
+check_and_set_gpu_usage()
 
 # Load the configuration matching the input argument:
 if CASE == "global"
