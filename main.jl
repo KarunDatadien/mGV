@@ -1,7 +1,7 @@
 include("packages.jl")
+include("utils.jl")
 include("init.jl")
 include("io.jl")
-include("utils.jl")
 include("evapotranspiration.jl")
 
 # Loop over years and process precipitation data
@@ -12,14 +12,13 @@ for year in start_year:end_year
 
     output_file = joinpath(output_dir, "$(output_file_prefix)$(year).nc")
 
-    # Read input variables and allocate GPU arrays
-    @time (d_prec,    prec,      prec_gpu)           = read_and_allocate(input_prec_prefix,    year, prec_var)
-    (d_tair,    tair,      tair_gpu)           = read_and_allocate(input_tair_prefix,    year, tair_var)
-    (d_wind,    wind,      wind_gpu)           = read_and_allocate(input_wind_prefix,    year, wind_var)
-    (d_vp,      vp,        vp_gpu)             = read_and_allocate(input_vp_prefix,      year, vp_var)
-    (d_swdown,  swdown,    swdown_gpu)         = read_and_allocate(input_swdown_prefix,  year, swdown_var)
-    (d_lwdown,  lwdown,    lwdown_gpu)         = read_and_allocate(input_lwdown_prefix,  year, lwdown_var)
- 
+    prec, prec_gpu     = read_and_allocate_conditionally(input_prec_prefix,   year,   prec_var)
+    tair, tair_gpu     = read_and_allocate_conditionally(input_tair_prefix,   year,   tair_var)
+    wind, wind_gpu     = read_and_allocate_conditionally(input_wind_prefix,   year,   wind_var)
+    vp, vp_gpu         = read_and_allocate_conditionally(input_vp_prefix,     year,     vp_var)
+    swdown, swdown_gpu = read_and_allocate_conditionally(input_swdown_prefix, year, swdown_var)
+    lwdown, lwdown_gpu = read_and_allocate_conditionally(input_lwdown_prefix, year, lwdown_var)
+
     println("Load precipitation input...")
     @time prec_cpu_preload = prec[:, :, :]
     println("Load air temperature input...")
@@ -35,14 +34,20 @@ for year in start_year:end_year
     # Process and write data one day at a time
     @showprogress "Processing year $year (GPU)..." for day in 1:num_days
         # Explicitly copy the cleaned data to the GPU
-        CUDA.copyto!(prec_gpu, prec_cpu_preload[:, :, day])
-        CUDA.copyto!(tair_gpu, tair_cpu_preload[:, :, day]) 
+        if GPU_USE == true
+            CUDA.copyto!(prec_gpu, prec_cpu_preload[:, :, day])
+            CUDA.copyto!(tair_gpu, tair_cpu_preload[:, :, day]) 
+            apply_gpu_transformations!(prec_gpu, tair_gpu, 50)
 
-        apply_gpu_transformations!(prec_gpu, tair_gpu, 50)
+            # Write results to the NetCDF file from the GPU
+            prec_scaled[:, :, day] = Array(prec_gpu)
+            tair_scaled[:, :, day] = Array(tair_gpu)
+        else
 
-        # Write results directly to the NetCDF file from the GPU
-        prec_scaled[:, :, day] = Array(prec_gpu)
-        tair_scaled[:, :, day] = Array(tair_gpu)
+            apply_cpu_transformations!(prec_cpu_preload[:, :, day], tair_cpu_preload[:, :, day], 50)
+            prec_scaled[:, :, day] = prec_cpu_preload[:, :, day]
+            tair_scaled[:, :, day] = tair_cpu_preload[:, :, day]
+        end
     end
 
     println("Close output file...")
