@@ -1,10 +1,3 @@
-"""
-    check_and_set_gpu_usage()
-
-Checks whether the system can run on an NVIDIA GPU via CUDA. 
-If CUDA is available, sets `GPU_USE` to true; otherwise sets it to false. 
-Also prints a message indicating which mode is in use.
-"""
 function check_and_set_gpu_usage()
     if CUDA.has_cuda()
         global GPU_USE = true
@@ -31,7 +24,6 @@ function parse_case_args()
     
     return local_case, local_start_year_arg, local_end_year_arg
 end
-
 
 # Asynchronously compresses a NetCDF file using `nccopy`, offloading compression to the shell for efficiency.
 # Accepts `output_file` and `compression_level` (1 = fast/light, 9 = slow/max).

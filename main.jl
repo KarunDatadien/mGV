@@ -12,18 +12,13 @@ for year in start_year:end_year
 
     output_file = joinpath(output_dir, "$(output_file_prefix)$(year).nc")
 
-    prec, prec_gpu     = read_and_allocate_conditionally(input_prec_prefix,   year,   prec_var)
-    tair, tair_gpu     = read_and_allocate_conditionally(input_tair_prefix,   year,   tair_var)
-    wind, wind_gpu     = read_and_allocate_conditionally(input_wind_prefix,   year,   wind_var)
-    vp, vp_gpu         = read_and_allocate_conditionally(input_vp_prefix,     year,     vp_var)
-    swdown, swdown_gpu = read_and_allocate_conditionally(input_swdown_prefix, year, swdown_var)
-    lwdown, lwdown_gpu = read_and_allocate_conditionally(input_lwdown_prefix, year, lwdown_var)
-
-    println("Load precipitation input...")
-    @time prec_cpu_preload = prec[:, :, :]
-    println("Load air temperature input...")
-    @time tair_cpu_preload = tair[:, :, :]
-
+    (prec,    prec_cpu_preload,    prec_gpu)    = read_and_allocate_conditionally(input_prec_prefix,    year, prec_var)
+    (tair,    tair_cpu_preload,    tair_gpu)    = read_and_allocate_conditionally(input_tair_prefix,    year, tair_var)
+    (wind,    wind_cpu_preload,    wind_gpu)    = read_and_allocate_conditionally(input_wind_prefix,    year, wind_var)
+    (vp,      vp_cpu_preload,      vp_gpu)      = read_and_allocate_conditionally(input_vp_prefix,      year, vp_var)
+    (swdown,  swdown_cpu_preload,  swdown_gpu)  = read_and_allocate_conditionally(input_swdown_prefix,  year, swdown_var)
+    (lwdown,  lwdown_cpu_preload,  lwdown_gpu)  = read_and_allocate_conditionally(input_lwdown_prefix,  year, lwdown_var)
+    
     println("Open output file...")
     @time out_ds, prec_scaled, tair_scaled = create_output_netcdf(output_file, prec)
 
@@ -36,14 +31,18 @@ for year in start_year:end_year
         # Explicitly copy the cleaned data to the GPU
         if GPU_USE == true
             CUDA.copyto!(prec_gpu, prec_cpu_preload[:, :, day])
-            CUDA.copyto!(tair_gpu, tair_cpu_preload[:, :, day]) 
+            CUDA.copyto!(tair_gpu, tair_cpu_preload[:, :, day])
+            CUDA.copyto!(wind_gpu, wind_cpu_preload[:, :, day])
+            CUDA.copyto!(vp_gpu, vp_cpu_preload[:, :, day]) 
+            CUDA.copyto!(swdown_gpu, swdown_cpu_preload[:, :, day])
+            CUDA.copyto!(lwdown_gpu, lwdown_cpu_preload[:, :, day]) 
+
             apply_gpu_transformations!(prec_gpu, tair_gpu, 50)
 
             # Write results to the NetCDF file from the GPU
             prec_scaled[:, :, day] = Array(prec_gpu)
             tair_scaled[:, :, day] = Array(tair_gpu)
         else
-
             apply_cpu_transformations!(prec_cpu_preload[:, :, day], tair_cpu_preload[:, :, day], 50)
             prec_scaled[:, :, day] = prec_cpu_preload[:, :, day]
             tair_scaled[:, :, day] = tair_cpu_preload[:, :, day]

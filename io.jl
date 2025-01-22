@@ -4,24 +4,27 @@ if !isdir(output_dir)
     mkpath(output_dir)
 end
 
-# Helper function that reads and allocates data, returning either
-# (cpu_data, gpu_data) or (cpu_data, nothing), depending on GPU_USE.
 function read_and_allocate_conditionally(prefix::String, year::Int, varname::String)
-    cpu_arr = read_netcdf_variable(prefix, year, varname)
-    # Conditionally allocate a GPU array (if GPU_USE is true)
+    println("Loading $varname input...")
+
+    # 1) Open netCDF file, read variable into a CPU array and copy array into preload
+    file_path     = "$(prefix)$(year).nc"
+    dataset       = NetCDF.open(file_path)
+    cpu_arr       = dataset[varname]
+    cpu_preload   = dataset[varname][:, :, :]
+    
+    # 2) Conditionally allocate a GPU array
     if GPU_USE
         gpu_arr = CUDA.zeros(Float32, size(cpu_arr, 1), size(cpu_arr, 2))
-        return cpu_arr, gpu_arr
+        return cpu_arr, cpu_preload, gpu_arr
     else
-        return cpu_arr, nothing
+        return cpu_arr, cpu_preload, nothing
     end
 end
 
-# Helper function to read a NetCDF variable
-function read_netcdf_variable(prefix, year, variable_name)
-    file_path = "$(prefix)$(year).nc"
-    dataset = NetCDF.open(file_path)
-    return dataset[variable_name]  # Return both the dataset and the variable
+function preload_data(msg::String, arr)
+    println(msg)
+    return arr[:, :, :]
 end
 
 function create_output_netcdf(output_file::String, reference_array)
