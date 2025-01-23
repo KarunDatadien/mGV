@@ -51,21 +51,8 @@ for year in start_year:end_year
             CUDA.copyto!(lwdown_gpu, lwdown_cpu_preload[:, :, day]) 
 
             # Run computations
-            c_value = compute_c(z2, d0_gpu, z0_gpu, K)
-            # Python: Ri_B = pf.calculate_richardson_number(z_2, d_0[:, current_month, :, :], airtemp_data[current_day_in_airtemp_file, :, :], airtemp_data[current_day_in_airtemp_file, :, :], u_n_z2, z_0[:, current_month, :, :])
+            aerodynamic_resistance = compute_aerodynamic_resistance(z2, d0_gpu, z0_gpu, K, tsurf, tair_gpu, wind_gpu)
             
-            #u_n_z2 = wind_data[current_day_in_wind_file, :, :] # wind speed over nth surface cover class at level z2[n]
-            # Julia version, to be inspected:
-            # Ri = compute_richardson_number(z2, d0_gpu[:, :, month, :], tsurf, tair_gpu[:, :, day], wind_gpu[:, :, day], z0_gpu[:, :, month, :])
-            
-            # Julia version, to be inspected:
-            # Fw = compute_Fw(Ri_B, c_value)
-
-            # Python versions:
-            # C_w = 1.351 * a_n_squared * F_w # done
-            # r_w = 1 / (C_w * u_n_z2)  # Aerodynamic resistance to transfer of water
-
-
             # Write results to the NetCDF file from the GPU
             prec_scaled[:, :, day] = Array(prec_gpu)
             tair_scaled[:, :, day] = Array(tair_gpu)
