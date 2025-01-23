@@ -22,30 +22,3 @@ end
 function calculate_latent_heat_gpu(temp::CuArray{Float32})
     return lat_vap .- 2361.0 .* temp
 end
-
-function compute_richardson_number(z2, d0, tsurf, tair, wind)
-    """
-    Computes the Richardson number for given atmospheric parameters.
-
-    Arguments:
-        z      :: Height above ground level (scalar or array)
-        d0     :: Zero-plane displacement height (array)
-        tsurf  :: Surface temperature (scalar)
-        tair   :: Air temperature (array)
-        wind   :: Wind speed (array)
-        z0     :: Roughness length (array)
-
-    Returns:
-        Ri_B     :: The Richardson number (array), clamped to the range [-0.5, 0.2].
-    """
-    # Calculate Richardson number
-    Ri_B = ifelse.(
-        tsurf .!= tair,  # Element-wise comparison
-        g .* (tair .- tsurf) .* (z2 .- d0) ./ 
-        (((tair .+ t_freeze) .+ (tsurf .+ t_freeze)) ./ 2 .* wind.^2),
-        0.0
-    )
-
-    # Clamp Richardson number to the valid range
-    return clamp.(Ri_B, -0.5, Ri_cr)
-end
