@@ -25,6 +25,12 @@ function parse_case_args()
     return local_case, local_start_year_arg, local_end_year_arg
 end
 
+function day_to_month(day::Int, year::Int)
+    # Construct the date from the year and day of the year
+    date = Date(year, 1, 1) + Day(day - 1)
+    return month(date)  # Extract the month from the date
+end
+
 # Asynchronously compresses a NetCDF file using `nccopy`, offloading compression to the shell for efficiency.
 # Accepts `output_file` and `compression_level` (1 = fast/light, 9 = slow/max).
 function compress_file_async(output_file::String, compression_level::Int)

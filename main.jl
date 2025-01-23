@@ -1,35 +1,48 @@
 include("packages.jl")
+include("constants.jl")
 include("utils.jl")
 include("init.jl")
 include("io.jl")
+include("physics.jl")
 include("evapotranspiration.jl")
 
-# Loop over years and process precipitation data
+using .SimConstants
+
+# Loop over years
 for year in start_year:end_year
     println("============ Start run for year: $year ============")
-
-    println("Loading files and allocating memory...")
-
     output_file = joinpath(output_dir, "$(output_file_prefix)$(year).nc")
 
-    (prec,    prec_cpu_preload,    prec_gpu)    = read_and_allocate_conditionally(input_prec_prefix,    year, prec_var)
-    (tair,    tair_cpu_preload,    tair_gpu)    = read_and_allocate_conditionally(input_tair_prefix,    year, tair_var)
-    (wind,    wind_cpu_preload,    wind_gpu)    = read_and_allocate_conditionally(input_wind_prefix,    year, wind_var)
-    (vp,      vp_cpu_preload,      vp_gpu)      = read_and_allocate_conditionally(input_vp_prefix,      year, vp_var)
-    (swdown,  swdown_cpu_preload,  swdown_gpu)  = read_and_allocate_conditionally(input_swdown_prefix,  year, swdown_var)
-    (lwdown,  lwdown_cpu_preload,  lwdown_gpu)  = read_and_allocate_conditionally(input_lwdown_prefix,  year, lwdown_var)
+    println("Loading parameter data and allocating memory...")
+    (d0,    d0_cpu_preload,    d0_gpu)    = read_and_allocate(input_param_file,    year, d0_var)
+    (z0,    z0_cpu_preload,    z0_gpu)    = read_and_allocate(input_param_file,    year, z0_var)
     
-    println("Open output file...")
-    @time out_ds, prec_scaled, tair_scaled = create_output_netcdf(output_file, prec)
+    println("Loading forcing data and allocating memory...")
+    (prec,    prec_cpu_preload,    prec_gpu)    = read_and_allocate(input_prec_prefix,    year, prec_var)
+    (tair,    tair_cpu_preload,    tair_gpu)    = read_and_allocate(input_tair_prefix,    year, tair_var)
+    (wind,    wind_cpu_preload,    wind_gpu)    = read_and_allocate(input_wind_prefix,    year, wind_var)
+    (vp,      vp_cpu_preload,      vp_gpu)      = read_and_allocate(input_vp_prefix,      year, vp_var)
+    (swdown,  swdown_cpu_preload,  swdown_gpu)  = read_and_allocate(input_swdown_prefix,  year, swdown_var)
+    (lwdown,  lwdown_cpu_preload,  lwdown_gpu)  = read_and_allocate(input_lwdown_prefix,  year, lwdown_var)
 
-    # Set number of days in the current year
-    num_days = size(prec, 3)
+    out_ds, prec_scaled, tair_scaled = create_output_netcdf(output_file, prec)
 
-    println("Running...")
-    # Process and write data one day at a time
+    num_days = size(prec, 3) # Set number of days in the current year
+    month_prev = 0
+
+    println("Running...") 
     @showprogress "Processing year $year (GPU)..." for day in 1:num_days
-        # Explicitly copy the cleaned data to the GPU
+        month = day_to_month(day, year)
+        #println("Day: $day, Month: $month")
+
         if GPU_USE == true
+            # Explicitly copy preloaded data to the GPU
+            # Load monthly input data
+            if month != month_prev
+                CUDA.copyto!(d0_gpu, d0_cpu_preload[:, :, month, :])
+                CUDA.copyto!(z0_gpu, z0_cpu_preload[:, :, month, :])
+            end
+            # Load daily input data
             CUDA.copyto!(prec_gpu, prec_cpu_preload[:, :, day])
             CUDA.copyto!(tair_gpu, tair_cpu_preload[:, :, day])
             CUDA.copyto!(wind_gpu, wind_cpu_preload[:, :, day])
@@ -37,16 +50,34 @@ for year in start_year:end_year
             CUDA.copyto!(swdown_gpu, swdown_cpu_preload[:, :, day])
             CUDA.copyto!(lwdown_gpu, lwdown_cpu_preload[:, :, day]) 
 
-            apply_gpu_transformations!(prec_gpu, tair_gpu, 50)
+            # Run computations
+            c_value = compute_c(z2, d0_gpu, z0_gpu, K)
+            # Python: Ri_B = pf.calculate_richardson_number(z_2, d_0[:, current_month, :, :], airtemp_data[current_day_in_airtemp_file, :, :], airtemp_data[current_day_in_airtemp_file, :, :], u_n_z2, z_0[:, current_month, :, :])
+            
+            #u_n_z2 = wind_data[current_day_in_wind_file, :, :] # wind speed over nth surface cover class at level z2[n]
+            # Julia version, to be inspected:
+            # Ri = compute_richardson_number(z2, d0_gpu[:, :, month, :], tsurf, tair_gpu[:, :, day], wind_gpu[:, :, day], z0_gpu[:, :, month, :])
+            
+            # Julia version, to be inspected:
+            # Fw = compute_Fw(Ri_B, c_value)
+
+            # Python versions:
+            # C_w = 1.351 * a_n_squared * F_w # done
+            # r_w = 1 / (C_w * u_n_z2)  # Aerodynamic resistance to transfer of water
+
 
             # Write results to the NetCDF file from the GPU
             prec_scaled[:, :, day] = Array(prec_gpu)
             tair_scaled[:, :, day] = Array(tair_gpu)
         else
-            apply_cpu_transformations!(prec_cpu_preload[:, :, day], tair_cpu_preload[:, :, day], 50)
-            prec_scaled[:, :, day] = prec_cpu_preload[:, :, day]
-            tair_scaled[:, :, day] = tair_cpu_preload[:, :, day]
+            # CPU version (to be tested):
+            # apply_cpu_transformations!(prec_cpu_preload[:, :, day], tair_cpu_preload[:, :, day], 50)
+            # prec_scaled[:, :, day] = prec_cpu_preload[:, :, day]
+            # tair_scaled[:, :, day] = tair_cpu_preload[:, :, day]
         end
+
+        month_prev = month
+
     end
 
     println("Close output file...")

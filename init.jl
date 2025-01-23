@@ -18,6 +18,9 @@ if CASE == "global"
     input_lwdown_prefix    = "./global_data/5arcmin/forcing/lwdown/lwdown_WFDE5_v2.0_5arcmin_"
     
     # Input variable names (as specified in the input files' metadata)
+    d0_var = "displacement"
+    z0_var = "veg_rough"
+
     prec_var = "prec"
     tair_var = "tair"
     wind_var = "wind" 
@@ -54,6 +57,9 @@ elseif CASE == "indus"
     # input_psurf_prefix     = "./indus_data/psurf_daily_GFDL-ESM4_historical/psurf_daily_GFDL-ESM4_historical_"
     
     # Input variable names (as specified in the input files' metadata)
+    d0_var = "displacement"
+    z0_var = "veg_rough"
+    
     prec_var = "pr"
     tair_var = "tas"
     wind_var = "wind10" 
