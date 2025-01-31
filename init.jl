@@ -20,6 +20,39 @@ if CASE == "global"
     # Input variable names (as specified in the input files' metadata)
     d0_var = "displacement"
     z0_var = "veg_rough"
+    LAI_var = "LAI"
+    rmin_var = "rmin"
+    rarc_var = "rarc"
+    elev_var = "elev"
+    albedo_var = "albedo"
+    root_var = "root_fract" # root_fract(veg_class, root_zone, lat, lon) ;
+    #root_fract_layer1 = root_fract[:, 0, :, :]
+    #root_fract_layer2 = root_fract[:, 1, :, :]
+    # === Field Capacity, Wilting Point, and Critical Moisture ===
+    Wcr_var = "Wcr_FRACT" #Wcr_FRACT(nlayer, lat, lon) 
+    Wfc_var = "Wfc_FRACT" #Wfc_FRACT(nlayer, lat, lon) 
+    Wpwp_var = "Wpwp_FRACT" #Wpwp_FRACT(nlayer, lat, lon) 
+    #soil_moisture_critical = Wcr_var * soil_moisture_max
+    #field_capacity = Wfc_var * soil_moisture_max
+    #wilting_point = Wpwp_var * soil_moisture_max
+
+
+
+    # === Extract Soil Parameters ===
+    depth_var = "depth" #depth(nlayer, lat, lon)
+    bulk_dens_var = "bulk_density" #bulk_density(nlayer, lat, lon)
+    soil_dens_var = "soil_density" #soil_density(nlayer, lat, lon) 
+
+    # === Calculate Bulk Density, Porosity, and Maximum Soil Moisture ===
+    #organic_frac = 0
+    #bulk_dens_org = 0
+    #soil_dens_org = 0
+
+    #bulk_dens_min = (bulk_density - organic_frac * bulk_dens_org) / (1 - organic_frac)
+    #soil_dens_min = (soil_density - organic_frac * soil_dens_org) / (1 - organic_frac)
+    #porosity = 1 - bulk_dens_min / soil_dens_min
+    #soil_moisture_max = depth * porosity * 1000
+
 
     prec_var = "prec"
     tair_var = "tair"
@@ -38,6 +71,7 @@ if CASE == "global"
     
     # ========================= END GLOBAL CONFIGURATION ==========================
 
+    ensure_output_directory(output_dir)
     println("Running from year $start_year to year $end_year.\n")
 
 elseif CASE == "indus"
@@ -59,7 +93,12 @@ elseif CASE == "indus"
     # Input variable names (as specified in the input files' metadata)
     d0_var = "displacement"
     z0_var = "veg_rough"
-    
+    LAI_var = "LAI"
+    rmin_var = "rmin"
+    rarc_var = "rarc"
+    elev_var = "elev"
+
+
     prec_var = "pr"
     tair_var = "tas"
     wind_var = "wind10" 
@@ -77,8 +116,10 @@ elseif CASE == "indus"
     
     # ========================== END INDUS CONFIGURATION ==========================
 
+    ensure_output_directory(output_dir)
     println("Running from year $start_year to year $end_year. \n")
 
 else
     error("Unknown CASE: '$CASE'. Please provide 'global' or 'indus' (or any other case defined in init.jl) as the first argument.")
 end
+
