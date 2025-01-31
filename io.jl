@@ -1,29 +1,29 @@
-# Check the output directory exists, otherwise create it
-if !isdir(output_dir)
-    println("Output directory '$output_dir' does not exist. Creating it...")
-    mkpath(output_dir)
+function ensure_output_directory(output_dir::String)
+    # Check if the output directory exists, otherwise create it
+    if !isdir(output_dir)
+        println("Output directory '$output_dir' does not exist. Creating it...")
+        mkpath(output_dir)
+    end
 end
 
-function read_and_allocate(prefix::String, year::Int, varname::String)
-    println("Loading $varname input...")
+function read_and_allocate_parameter(varname::String)
+    println("Loading $varname parameter input...")
 
     # 1) Open netCDF file, read variable into a CPU array and copy array into preload
-    if endswith(prefix, ".nc")
-        file_path = prefix
-    else
-        file_path = "$(prefix)$(year).nc"
-    end
-    dataset       = NetCDF.open(file_path)
+    dataset       = NetCDF.open(input_param_file)
     cpu_arr       = dataset[varname]
     var_dims      = size(dataset[varname])  # Get the dimensions of the variable
 
     # Handle slicing based on dimensionality
     if length(var_dims) == 2
         cpu_preload = dataset[varname][:, :]
+        println("Element type for 2D: ", eltype(cpu_preload))
     elseif length(var_dims) == 3
         cpu_preload = dataset[varname][:, :, :]
+        println("Element type for 3D: ", eltype(cpu_preload))
     elseif length(var_dims) == 4
         cpu_preload = dataset[varname][:, :, :, :]
+        println("Element type for 4D: ", eltype(cpu_preload))
     else
         error("Unsupported variable dimensionality: ", length(var_dims))
     end
@@ -36,7 +36,7 @@ function read_and_allocate(prefix::String, year::Int, varname::String)
     if GPU_USE
         # Adjust dimensions for the GPU array
         adjusted_dims = if length(var_dims) == 3
-            (var_dims[1], var_dims[2], 1)  # Third dimension is reduced to 1
+            (var_dims[1], var_dims[2], var_dims[3])
         elseif length(var_dims) == 4
             (var_dims[1], var_dims[2], 1, var_dims[4])  # Third dimension is reduced to 1
         else
@@ -45,9 +45,28 @@ function read_and_allocate(prefix::String, year::Int, varname::String)
 
         gpu_arr = CUDA.zeros(Float32, adjusted_dims...)  # Allocate based on adjusted dimensions
         println("Allocated GPU array of size: ", size(gpu_arr))
-        return cpu_arr, cpu_preload, gpu_arr
+        return cpu_preload, gpu_arr
     else
-        return cpu_arr, cpu_preload, nothing
+        return cpu_preload, nothing
+    end
+end
+
+function read_and_allocate_forcing(prefix::String, year::Int, varname::String)
+    println("Loading $varname forcing input...")
+
+    # 1) Open netCDF file, read variable into a CPU array and copy array into preload
+    file_path     = "$(prefix)$(year).nc"
+    dataset       = NetCDF.open(file_path)
+    cpu_arr       = dataset[varname]
+    cpu_preload   = dataset[varname][:, :, :]
+    
+    # 2) Conditionally allocate a GPU array
+    if GPU_USE
+        gpu_arr = CUDA.zeros(Float32, size(cpu_arr, 1), size(cpu_arr, 2))
+        println("Allocated GPU array of size: ", size(gpu_arr))
+        return cpu_preload, gpu_arr
+    else
+        return cpu_preload, nothing
     end
 end
 
@@ -64,18 +83,43 @@ function create_output_netcdf(output_file::String, reference_array)
     # Define the variables to be written
     pr_scaled = defVar(out_ds, "scaled_precipitation", Float32, ("lon", "lat", "time"),
                        deflatelevel = 0, # Compression done afterwards with compress_file_async
-                       chunksizes   = (64, 64, 1),
-                       fillvalue    = -9999.0f0)
+                       chunksizes   = (64, 64, 1))
 
     tair_scaled = defVar(out_ds, "scaled_tair", Float32, ("lon", "lat", "time"),
                          deflatelevel = 0, # Compression done afterwards with compress_file_async
-                         chunksizes   = (64, 64, 1),
-                         fillvalue    = -9999.0f0)
+                         chunksizes   = (64, 64, 1))
 
     # Set attributes                     
     pr_scaled.attrib["units"]       = "mm/day"
     pr_scaled.attrib["description"] = "Daily precipitation scaled with GPU computations (optimized)"
-                     
 
     return out_ds, pr_scaled, tair_scaled
+end
+
+const static_input_loaded = Ref(false)
+function gpu_load_static_inputs(cpu_vars, gpu_vars)
+    if !static_input_loaded[]
+        for (cpu, gpu) in zip(cpu_vars, gpu_vars)
+            CUDA.copyto!(gpu, cpu)
+        end
+        static_input_loaded[] = true
+    end
+end
+
+function gpu_load_monthly_inputs(month, month_prev, cpu_vars, gpu_vars)
+    if month != month_prev
+        for (cpu, gpu) in zip(cpu_vars, gpu_vars)
+            CUDA.copyto!(gpu, cpu[:, :, month, :])
+        end
+    end
+end
+
+function gpu_load_daily_inputs(day, day_prev, cpu_vars, gpu_vars)
+    if day != day_prev
+        for (cpu, gpu) in zip(cpu_vars, gpu_vars)
+            println("CPU Array Type: ", eltype(cpu))
+            println("GPU Array Type: ", eltype(gpu))
+            CUDA.copyto!(gpu, cpu[:, :, day])
+        end
+    end
 end
