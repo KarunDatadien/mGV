@@ -1,11 +1,12 @@
 module SimConstants
-    export N_veg, K_L, K, z2, Ri_B
+    export N_veg, K_L, K, z2, Ri_cr, emissivity
 
     const N_veg = 20
     const K_L = 0.1
     const K = 0.4
     const z2 = 10
     const Ri_cr = 0.2
+    const emissivity = 0.97 
 end
 
 module PhysicalConstants
