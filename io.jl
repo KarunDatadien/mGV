@@ -117,8 +117,8 @@ end
 function gpu_load_daily_inputs(day, day_prev, cpu_vars, gpu_vars)
     if day != day_prev
         for (cpu, gpu) in zip(cpu_vars, gpu_vars)
-            println("CPU Array Type: ", eltype(cpu))
-            println("GPU Array Type: ", eltype(gpu))
+            # println("CPU Array Type: ", eltype(cpu))
+            # println("GPU Array Type: ", eltype(gpu))
             CUDA.copyto!(gpu, cpu[:, :, day])
         end
     end

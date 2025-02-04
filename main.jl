@@ -53,24 +53,24 @@ for year in start_year:end_year
         # Explicitly copy preloaded data to the GPU
         if GPU_USE == true
 
-            @time gpu_load_static_inputs([rmin_cpu, rarc_cpu, elev_cpu], 
+            gpu_load_static_inputs([rmin_cpu, rarc_cpu, elev_cpu], 
                                          [rmin_gpu, rarc_gpu, elev_gpu])
 
-            @time gpu_load_monthly_inputs(month, month_prev, 
+            gpu_load_monthly_inputs(month, month_prev, 
                                           [d0_cpu, z0_cpu, LAI_cpu, albedo_cpu], 
                                           [d0_gpu, z0_gpu, LAI_gpu, albedo_gpu])
 
-            @time gpu_load_daily_inputs(day, day_prev, 
+            gpu_load_daily_inputs(day, day_prev, 
                                         [prec_cpu, tair_cpu, wind_cpu, vp_cpu, swdown_cpu, lwdown_cpu], 
                                         [prec_gpu, tair_gpu, wind_gpu, vp_gpu, swdown_gpu, lwdown_gpu])
 
             #println("Start computations for potential evaporation...") 
             tsurf = tair_gpu #TODO: calculate actual tsurf
 
-            @time aerodynamic_resistance = compute_aerodynamic_resistance(z2, d0_gpu, z0_gpu, K, tsurf, tair_gpu, wind_gpu)
-            @time canopy_resistance = compute_canopy_resistance(rmin_gpu, LAI_gpu)
-            @time net_radiation = calculate_net_radiation(swdown_gpu, lwdown_gpu, albedo_gpu, tsurf) 
-            @time potential_evaporation = calculate_potential_evaporation(tair_gpu, vp_gpu, elev_gpu, net_radiation, aerodynamic_resistance, canopy_resistance, rarc_gpu)
+           # aerodynamic_resistance = compute_aerodynamic_resistance(z2, d0_gpu, z0_gpu, K, tsurf, tair_gpu, wind_gpu)
+           # canopy_resistance = compute_canopy_resistance(rmin_gpu, LAI_gpu)
+           # net_radiation = calculate_net_radiation(swdown_gpu, lwdown_gpu, albedo_gpu, tsurf) 
+           # potential_evaporation = calculate_potential_evaporation(tair_gpu, vp_gpu, elev_gpu, net_radiation, aerodynamic_resistance, canopy_resistance, rarc_gpu)
             
     #        canopy_evaporation = calculate_canopy_evaporation(W_i, LAI_gpu, potential_evaporation, aerodynamic_resistance, rarc_gpu, prec_gpu)
     #        transpiration = calculate_transpiration(potential_evaporation, aerodynamic_resistance, rarc_gpu, canopy_resistance, W_i, W_im, soil_moisture_old, soil_moisture_critical, wilting_point, root_fract_layer1, root_fract_layer2)
@@ -85,8 +85,8 @@ for year in start_year:end_year
 
 
             # Write results to the NetCDF file from the GPU
-            @time prec_scaled[:, :, day] = Array(prec_gpu)
-            @time tair_scaled[:, :, day] = Array(tair_gpu)
+            prec_scaled[:, :, day] = Array(prec_gpu)
+            tair_scaled[:, :, day] = Array(tair_gpu)
 
         end
 
