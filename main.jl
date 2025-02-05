@@ -6,8 +6,8 @@ include("init.jl")
 include("physics.jl")
 include("evapotranspiration.jl")
 
-println("Loading parameter data and allocating memory...")
 using .SimConstants
+println("Loading parameter data and allocating memory...")
 @time begin
     (d0_cpu,        d0_gpu)        = read_and_allocate_parameter(d0_var)
     (z0_cpu,        z0_gpu)        = read_and_allocate_parameter(z0_var)
@@ -25,8 +25,7 @@ using .SimConstants
     (soil_dens_cpu, soil_dens_gpu) = read_and_allocate_parameter(soil_dens_var)
 end
 
-# Loop over years
-for year in start_year:end_year
+function process_year(year)
     println("============ Start run for year: $year ============")
     println("Loading forcing data and allocating memory...")
     @time begin
@@ -43,34 +42,30 @@ for year in start_year:end_year
     @time out_ds, prec_scaled, tair_scaled = create_output_netcdf(output_file, prec_cpu)
 
     println("Running...") 
-    num_days = size(prec_cpu, 3) # Set number of days in the current year
+    num_days = size(prec_cpu, 3)
     day_prev = 0
-    month_prev = 0 # Initialize previous month to 0 at start of year
+    month_prev = 0
     
     @showprogress "Processing year $year (GPU)..." for day in 1:num_days
         month = day_to_month(day, year)
-
-        # Explicitly copy preloaded data to the GPU
         if GPU_USE == true
-
+            # Explicitly copy preloaded data to the GPU
             gpu_load_static_inputs([rmin_cpu, rarc_cpu, elev_cpu], 
-                                         [rmin_gpu, rarc_gpu, elev_gpu])
-
+                                   [rmin_gpu, rarc_gpu, elev_gpu])
             gpu_load_monthly_inputs(month, month_prev, 
-                                          [d0_cpu, z0_cpu, LAI_cpu, albedo_cpu], 
-                                          [d0_gpu, z0_gpu, LAI_gpu, albedo_gpu])
-
+                                    [d0_cpu, z0_cpu, LAI_cpu, albedo_cpu], 
+                                    [d0_gpu, z0_gpu, LAI_gpu, albedo_gpu])
             gpu_load_daily_inputs(day, day_prev, 
-                                        [prec_cpu, tair_cpu, wind_cpu, vp_cpu, swdown_cpu, lwdown_cpu], 
-                                        [prec_gpu, tair_gpu, wind_gpu, vp_gpu, swdown_gpu, lwdown_gpu])
+                                  [prec_cpu, tair_cpu, wind_cpu, vp_cpu, swdown_cpu, lwdown_cpu], 
+                                  [prec_gpu, tair_gpu, wind_gpu, vp_gpu, swdown_gpu, lwdown_gpu])
 
-            #println("Start computations for potential evaporation...") 
+            # Start computations for potential evaporation 
             tsurf = tair_gpu #TODO: calculate actual tsurf
 
-           # aerodynamic_resistance = compute_aerodynamic_resistance(z2, d0_gpu, z0_gpu, K, tsurf, tair_gpu, wind_gpu)
-           # canopy_resistance = compute_canopy_resistance(rmin_gpu, LAI_gpu)
-           # net_radiation = calculate_net_radiation(swdown_gpu, lwdown_gpu, albedo_gpu, tsurf) 
-           # potential_evaporation = calculate_potential_evaporation(tair_gpu, vp_gpu, elev_gpu, net_radiation, aerodynamic_resistance, canopy_resistance, rarc_gpu)
+            aerodynamic_resistance = compute_aerodynamic_resistance(z2, d0_gpu, z0_gpu, K, tsurf, tair_gpu, wind_gpu)
+            canopy_resistance = compute_canopy_resistance(rmin_gpu, LAI_gpu)
+            net_radiation = calculate_net_radiation(swdown_gpu, lwdown_gpu, albedo_gpu, tsurf) 
+            potential_evaporation = calculate_potential_evaporation(tair_gpu, vp_gpu, elev_gpu, net_radiation, aerodynamic_resistance, canopy_resistance, rarc_gpu)
             
     #        canopy_evaporation = calculate_canopy_evaporation(W_i, LAI_gpu, potential_evaporation, aerodynamic_resistance, rarc_gpu, prec_gpu)
     #        transpiration = calculate_transpiration(potential_evaporation, aerodynamic_resistance, rarc_gpu, canopy_resistance, W_i, W_im, soil_moisture_old, soil_moisture_critical, wilting_point, root_fract_layer1, root_fract_layer2)
@@ -83,26 +78,30 @@ for year in start_year:end_year
 
             #throughfall = np.maximum(0, W_i - W_im)
 
-
             # Write results to the NetCDF file from the GPU
             prec_scaled[:, :, day] = Array(prec_gpu)
             tair_scaled[:, :, day] = Array(tair_gpu)
-
         end
-
         day_prev = day
         month_prev = month
-
     end
 
-    println("Close output file...")
+    println("Closing output file...")
     close(out_ds)
-
+    
     println("============ Completed run for year: $year ============\n")
-
     println("Postprocessing for year $year:")
-    compress_file_async(output_file, 1)    
+    compress_file_async(output_file, 1)
+end
 
+# Loop over years:
+for year in start_year:end_year
+    if has_input_files(year)
+        process_year(year)
+        GC.gc()  # Force garbage collection after processing each year
+    else
+        println("Skipping year $year due to missing input files.")
+    end
 end
 
 println("Done!")
