@@ -28,6 +28,7 @@ if CASE == "global"
     root_var = "root_fract" # root_fract(veg_class, root_zone, lat, lon) ;
     #root_fract_layer1 = root_fract[:, 0, :, :]
     #root_fract_layer2 = root_fract[:, 1, :, :]
+    
     # === Field Capacity, Wilting Point, and Critical Moisture ===
     Wcr_var = "Wcr_FRACT" #Wcr_FRACT(nlayer, lat, lon) 
     Wfc_var = "Wfc_FRACT" #Wfc_FRACT(nlayer, lat, lon) 
@@ -36,7 +37,7 @@ if CASE == "global"
     #field_capacity = Wfc_var * soil_moisture_max
     #wilting_point = Wpwp_var * soil_moisture_max
 
-
+    coverage_var = "fcanopy" #fcanopy(veg_class, month, lat, lon) # "canopy coverage"
 
     # === Extract Soil Parameters ===
     depth_var = "depth" #depth(nlayer, lat, lon)
@@ -81,7 +82,7 @@ elseif CASE == "indus"
     # ============================ INDUS CONFIGURATION ============================
    
     # Input file paths/names
-    input_param_file       = "./indus_data/domain_Indus.nc"
+    input_param_file       = "./indus_data/VIC_params_Mirca_calibrated_Indus.nc"
     input_prec_prefix      = "./indus_data/pr_daily_GFDL-ESM4adj_historical/pr_daily_GFDL-ESM4adj_historical_"
     input_tair_prefix      = "./indus_data/tas_daily_GFDL-ESM4adj_historical/tas_daily_GFDL-ESM4adj_historical_"
     input_wind_prefix      = "./indus_data/wind10_daily_GFDL-ESM4_historical/wind10_daily_GFDL-ESM4_historical_"
@@ -97,8 +98,37 @@ elseif CASE == "indus"
     rmin_var = "rmin"
     rarc_var = "rarc"
     elev_var = "elev"
+    albedo_var = "albedo"
+    root_var = "root_fract" # root_fract(veg_class, root_zone, lat, lon) ;
 
+    #root_fract_layer1 = root_fract[:, 0, :, :]
+    #root_fract_layer2 = root_fract[:, 1, :, :]
+    
+    # === Field Capacity, Wilting Point, and Critical Moisture ===
+    Wcr_var = "Wcr_FRACT" #Wcr_FRACT(nlayer, lat, lon) 
+    Wfc_var = "Wfc_FRACT" #Wfc_FRACT(nlayer, lat, lon) 
+    Wpwp_var = "Wpwp_FRACT" #Wpwp_FRACT(nlayer, lat, lon) 
+    #soil_moisture_critical = Wcr_var * soil_moisture_max
+    #field_capacity = Wfc_var * soil_moisture_max
+    #wilting_point = Wpwp_var * soil_moisture_max
 
+    coverage_var = "fcanopy" #fcanopy(veg_class, month, lat, lon) # "canopy coverage"
+
+    # === Extract Soil Parameters ===
+    depth_var = "depth" #depth(nlayer, lat, lon)
+    bulk_dens_var = "bulk_density" #bulk_density(nlayer, lat, lon)
+    soil_dens_var = "soil_density" #soil_density(nlayer, lat, lon) 
+
+    # === Calculate Bulk Density, Porosity, and Maximum Soil Moisture ===
+    #organic_frac = 0
+    #bulk_dens_org = 0
+    #soil_dens_org = 0
+
+    #bulk_dens_min = (bulk_density - organic_frac * bulk_dens_org) / (1 - organic_frac)
+    #soil_dens_min = (soil_density - organic_frac * soil_dens_org) / (1 - organic_frac)
+    #porosity = 1 - bulk_dens_min / soil_dens_min
+    #soil_moisture_max = depth * porosity * 1000
+    
     prec_var = "pr"
     tair_var = "tas"
     wind_var = "wind10" 

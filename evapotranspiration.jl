@@ -34,14 +34,22 @@ end
 function compute_canopy_resistance(rmin_gpu, LAI_gpu)
     # Canopy resistance based on soil moisture (Eq. 6), without gsm multiplication; 
     # done in evapotranspiration calculation step   
-    return rmin_gpu ./ LAI_gpu
+
+    # Ensure rmin_gpu has dimensions (4320, 1680, 1, 14) for correct broadcasting
+    rmin_reshaped = reshape(rmin_gpu, size(rmin_gpu, 1), size(rmin_gpu, 2), 1, size(rmin_gpu, 3))
+    
+    # Perform element-wise division with correct shapes
+    return rmin_reshaped ./ LAI_gpu
 end
 
 function calculate_net_radiation(swdown_gpu, lwdown_gpu, albedo_gpu, tsurf)
     return (1 .- albedo_gpu) .* swdown_gpu .+ emissivity .* (lwdown_gpu .- sigma .* tsurf.^4)
 end
 
-function calculate_potential_evaporation(tair_gpu, vp_gpu, elev_gpu, net_radiation, aerodynamic_resistance, rc, rarc)
+function calculate_potential_evaporation(tair_gpu, vp_gpu, elev_gpu, net_radiation, aerodynamic_resistance, rc, rarc_gpu)
+
+    # Reshape rarc_gpu to match (4320, 1680, 1, 14) before computation
+    rarc_reshaped = reshape(rarc_gpu, size(rarc_gpu, 1), size(rarc_gpu, 2), 1, size(rarc_gpu, 3))
 
     vpd = calculate_vpd(tair_gpu,vp_gpu)
     slope = calculate_svp_slope(tair_gpu)
@@ -55,7 +63,7 @@ function calculate_potential_evaporation(tair_gpu, vp_gpu, elev_gpu, net_radiati
     
     # Penman-Monteith equation
     potential_evaporation = (slope .* net_radiation .+ air_density .* c_p_air .* vpd ./ aerodynamic_resistance) ./ 
-                            (latent_heat .* (slope .+ psychrometric_constant .* (1 .+ (rc .+ rarc) ./ aerodynamic_resistance))) .* day_sec
+                            (latent_heat .* (slope .+ psychrometric_constant .* (1 .+ (rc .+ rarc_reshaped) ./ aerodynamic_resistance))) .* day_sec
     
     # Ensure evaporation is non-negative when vapor pressure deficit is positive
     potential_evaporation = ifelse.((vpd .>= 0.0) .& (potential_evaporation .< 0.0), 0.0, potential_evaporation)
@@ -63,21 +71,20 @@ function calculate_potential_evaporation(tair_gpu, vp_gpu, elev_gpu, net_radiati
     return potential_evaporation
 end
 
+
 function calculate_max_water_storage(LAI_gpu)
     # Compute maximum water intercepted/stored in the canopy cover
     return K_L .* LAI_gpu  
 end
 
-function calculate_canopy_evaporation(W_i, LAI_gpu, potential_evaporation, aerodynamic_resistance, rarc, prec_gpu)
+function calculate_canopy_evaporation(water_storage, max_water_storage, LAI_gpu, potential_evaporation, aerodynamic_resistance, rarc, prec_gpu)
 
-    W_im = calculate_max_water_storage(LAI_gpu)
-    
     # Compute potential canopy evaporation
-    canopy_evaporation_star = (W_i ./ W_im).^(2 / 3) .* potential_evaporation .* 
+    canopy_evaporation_star = (water_storage ./ max_water_storage).^(2 / 3) .* potential_evaporation .* 
                               (aerodynamic_resistance ./ (aerodynamic_resistance .+ rarc))
 
     # Ensure canopy evaporation fraction (f_n) is bounded between 0 and 1
-    f_n = min.(1.0, (W_i .+ prec_gpu) ./ canopy_evaporation_star)
+    f_n = min.(1.0, (water_storage .+ prec_gpu) ./ canopy_evaporation_star)
 
     # Compute actual canopy evaporation
     canopy_evaporation = f_n .* canopy_evaporation_star
