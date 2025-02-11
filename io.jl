@@ -92,7 +92,7 @@ function read_and_allocate_forcing(prefix::String, year::Int, varname::String)
     end
 end
 
-function create_output_netcdf(output_file::String, reference_array)
+function create_output_netcdf(output_file::String, reference_array, reference_array2)
     println("Creating NetCDF output file...")
     out_ds = NCDataset(output_file, "c")
     
@@ -100,6 +100,7 @@ function create_output_netcdf(output_file::String, reference_array)
     defDim(out_ds, "lon",   size(reference_array, 1))
     defDim(out_ds, "lat",   size(reference_array, 2))
     defDim(out_ds, "time",  size(reference_array, 3))
+    defDim(out_ds, "nveg",  size(reference_array2, 4))
     defDim(out_ds, "layer", 3)
 
     # Define the variables to be written
@@ -107,15 +108,16 @@ function create_output_netcdf(output_file::String, reference_array)
                        deflatelevel = 0, # Compression done afterwards with compress_file_async
                        chunksizes   = (64, 64, 1))
 
-    tair_scaled = defVar(out_ds, "scaled_tair", Float32, ("lon", "lat", "time"),
-                         deflatelevel = 0, # Compression done afterwards with compress_file_async
-                         chunksizes   = (64, 64, 1))
+    water_storage_summed_output = defVar(out_ds, "water_storage_summed_output", Float32, ("lon", "lat", "time"))
+
+
+    water_storage_output = defVar(out_ds, "water_storage_output", Float32, ("lon", "lat", "time", "nveg"))
 
     # Set attributes                     
     pr_scaled.attrib["units"]       = "mm/day"
     pr_scaled.attrib["description"] = "Daily precipitation scaled with GPU computations (optimized)"
 
-    return out_ds, pr_scaled, tair_scaled
+    return out_ds, pr_scaled, water_storage_output, water_storage_summed_output
 end
 
 const static_input_loaded = Ref(false)

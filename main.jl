@@ -16,16 +16,24 @@ println("Loading parameter data and allocating memory...")
     (rmin_cpu,      rmin_gpu)      = read_and_allocate_parameter(rmin_var) 
     (rarc_cpu,      rarc_gpu)      = read_and_allocate_parameter(rarc_var) 
     (elev_cpu,      elev_gpu)      = read_and_allocate_parameter(elev_var) 
-    (root_cpu,      root_gpu)      = read_and_allocate_parameter(root_var)
+    (root_cpu,      root_gpu)      = read_and_allocate_parameter(root_var) # change how this is loaded: Full size of root_fract: (4320, 1680, 3, 14), Allocated GPU array of size: (4320, 1680, 1, 14)
     (Wcr_cpu,       Wcr_gpu)       = read_and_allocate_parameter(Wcr_var)
     (Wfc_cpu,       Wfc_gpu)       = read_and_allocate_parameter(Wfc_var)
     (Wpwp_cpu,      Wpwp_gpu)      = read_and_allocate_parameter(Wpwp_var)
     (depth_cpu,     depth_gpu)     = read_and_allocate_parameter(depth_var)
     (bulk_dens_cpu, bulk_dens_gpu) = read_and_allocate_parameter(bulk_dens_var)
     (soil_dens_cpu, soil_dens_gpu) = read_and_allocate_parameter(soil_dens_var)
+    (coverage_cpu,  coverage_gpu)  = read_and_allocate_parameter(coverage_var)
 end
 
+# === Initial States ===
+global water_storage = CUDA.fill(Float32(0.1), size(coverage_gpu))  # Fill with 0.1 on GPU
+global throughfall   = CUDA.zeros(Float32, size(coverage_gpu))      # Allocate zeros on GPU
+
 function process_year(year)
+    global water_storage  # Ensure we're modifying the global variable
+    global throughfall  # Ensure we're modifying the global variable
+
     println("============ Start run for year: $year ============")
     println("Loading forcing data and allocating memory...")
     @time begin
@@ -39,48 +47,82 @@ function process_year(year)
 
     println("Opening output file...")
     output_file = joinpath(output_dir, "$(output_file_prefix)$(year).nc")
-    @time out_ds, prec_scaled, tair_scaled = create_output_netcdf(output_file, prec_cpu)
+    @time out_ds, prec_scaled, water_storage_output, water_storage_summed_output = create_output_netcdf(output_file, prec_cpu, LAI_cpu)
 
     println("Running...") 
     num_days = size(prec_cpu, 3)
     day_prev = 0
     month_prev = 0
-    
+
     @showprogress "Processing year $year (GPU)..." for day in 1:num_days
         month = day_to_month(day, year)
+        
         if GPU_USE == true
             # Explicitly copy preloaded data to the GPU
             gpu_load_static_inputs([rmin_cpu, rarc_cpu, elev_cpu], 
                                    [rmin_gpu, rarc_gpu, elev_gpu])
             gpu_load_monthly_inputs(month, month_prev, 
-                                    [d0_cpu, z0_cpu, LAI_cpu, albedo_cpu], 
-                                    [d0_gpu, z0_gpu, LAI_gpu, albedo_gpu])
+                                    [d0_cpu, z0_cpu, LAI_cpu, albedo_cpu, coverage_cpu], 
+                                    [d0_gpu, z0_gpu, LAI_gpu, albedo_gpu, coverage_gpu])
             gpu_load_daily_inputs(day, day_prev, 
                                   [prec_cpu, tair_cpu, wind_cpu, vp_cpu, swdown_cpu, lwdown_cpu], 
                                   [prec_gpu, tair_gpu, wind_gpu, vp_gpu, swdown_gpu, lwdown_gpu])
 
-            # Start computations for potential evaporation 
-            tsurf = tair_gpu #TODO: calculate actual tsurf
+            # Start computations for potential evaporation
+            tsurf = tair_gpu  # TODO: calculate actual tsurf
 
-            aerodynamic_resistance = compute_aerodynamic_resistance(z2, d0_gpu, z0_gpu, K, tsurf, tair_gpu, wind_gpu)
+            aerodynamic_resistance = compute_aerodynamic_resistance(
+                z2, d0_gpu, z0_gpu, K, tsurf, tair_gpu, wind_gpu
+            )
+
             canopy_resistance = compute_canopy_resistance(rmin_gpu, LAI_gpu)
-            net_radiation = calculate_net_radiation(swdown_gpu, lwdown_gpu, albedo_gpu, tsurf) 
-            potential_evaporation = calculate_potential_evaporation(tair_gpu, vp_gpu, elev_gpu, net_radiation, aerodynamic_resistance, canopy_resistance, rarc_gpu)
+
+            net_radiation = calculate_net_radiation(
+                swdown_gpu, lwdown_gpu, albedo_gpu, tsurf
+            )
+
+            #println("aerodynamic_resistance SIZE:", size(aerodynamic_resistance)) 
+            #println("canopy_resistance SIZE:", size(canopy_resistance))
+            #println("rarc_gpu SIZE:", size(rarc_gpu)) 
+
+            potential_evaporation = calculate_potential_evaporation(
+                tair_gpu, vp_gpu, elev_gpu, net_radiation, 
+                aerodynamic_resistance, canopy_resistance, rarc_gpu
+            )
+
+            max_water_storage = calculate_max_water_storage(LAI_gpu)
+
+            canopy_evaporation = calculate_canopy_evaporation(
+                water_storage, max_water_storage, LAI_gpu, potential_evaporation, aerodynamic_resistance, rarc_gpu, prec_gpu
+            )
+
+            # Uncomment if needed:
+            # transpiration = calculate_transpiration(
+            #     potential_evaporation, aerodynamic_resistance, rarc_gpu, canopy_resistance, 
+            #     W_i, W_im, soil_moisture_old, soil_moisture_critical, wilting_point, 
+            #     root_fract_layer1, root_fract_layer2
+            # )
             
-    #        canopy_evaporation = calculate_canopy_evaporation(W_i, LAI_gpu, potential_evaporation, aerodynamic_resistance, rarc_gpu, prec_gpu)
-    #        transpiration = calculate_transpiration(potential_evaporation, aerodynamic_resistance, rarc_gpu, canopy_resistance, W_i, W_im, soil_moisture_old, soil_moisture_critical, wilting_point, root_fract_layer1, root_fract_layer2)
+            # === Update Water Storage ===
+            throughfall .= 0
+            #println("WATER STORAGE SIZE:", size(water_storage)) 
+            #println("PREC GPU SIZE:", size(prec_gpu))
+            #println("POTENTIAL EVAPORATION SIZE:", size(potential_evaporation)) 
 
+            water_storage .+= (prec_gpu .- potential_evaporation)
+            #println("WATER STORAGE SIZE:", size(water_storage)) 
+            #println("MAX WATER STORAGE SIZE:", size(max_water_storage)) 
 
-            # Update W_i:
-            #W_i += (current_precipitation[np.newaxis, :, :] - E_c[:, :, :]) # Water stored in canopy, evap happens on previous W_i, so before precipitation in current timestep
-            #W_i = np.minimum(W_i, W_im) # Ensure W_i doesn’t go above W_im
-            #W_i = np.maximum(0, W_i)    # Ensure W_i doesn’t go below 0
-
-            #throughfall = np.maximum(0, W_i - W_im)
+            # Ensure water_storage stays within valid bounds
+            water_storage .= clamp.(water_storage, 0, max_water_storage)
+            
+            # Compute throughfall
+            throughfall = max.(0, water_storage .- max_water_storage)
 
             # Write results to the NetCDF file from the GPU
+            water_storage_summed_output[:, :, day] = Array(sum(water_storage; dims=4)[:, :, :, 1])
+            #water_storage_output[:, :, day, :] = Array(water_storage)
             prec_scaled[:, :, day] = Array(prec_gpu)
-            tair_scaled[:, :, day] = Array(tair_gpu)
         end
         day_prev = day
         month_prev = month
@@ -90,11 +132,11 @@ function process_year(year)
     close(out_ds)
     
     println("============ Completed run for year: $year ============\n")
-    println("Postprocessing for year $year:")
+    println("Postprocessing for year $year...")
     compress_file_async(output_file, 1)
 end
 
-# Loop over years:
+# Main loop over years:
 for year in start_year:end_year
     if has_input_files(year)
         process_year(year)
