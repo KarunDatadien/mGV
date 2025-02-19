@@ -47,7 +47,7 @@ function process_year(year)
 
     println("Opening output file...")
     output_file = joinpath(output_dir, "$(output_file_prefix)$(year).nc")
-    @time out_ds, prec_scaled, water_storage_output, water_storage_summed_output = create_output_netcdf(output_file, prec_cpu, LAI_cpu)
+    @time out_ds, prec_scaled, water_storage_output = create_output_netcdf(output_file, prec_cpu, LAI_cpu)
 
     println("Running...") 
     num_days = size(prec_cpu, 3)
@@ -120,10 +120,11 @@ function process_year(year)
             throughfall = max.(0, water_storage .- max_water_storage)
 
             # Write results to the NetCDF file from the GPU
-            water_storage_summed_output[:, :, day] = Array(sum(water_storage; dims=4)[:, :, :, 1])
-            #water_storage_output[:, :, day, :] = Array(water_storage)
+            #water_storage_summed_output[:, :, day] = Array(sum(water_storage; dims=4)[:, :, :, 1])
+            water_storage_output[:, :, day, :] = Array(water_storage)
             prec_scaled[:, :, day] = Array(prec_gpu)
         end
+        
         day_prev = day
         month_prev = month
     end

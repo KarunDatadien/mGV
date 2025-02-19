@@ -108,16 +108,13 @@ function create_output_netcdf(output_file::String, reference_array, reference_ar
                        deflatelevel = 0, # Compression done afterwards with compress_file_async
                        chunksizes   = (64, 64, 1))
 
-    water_storage_summed_output = defVar(out_ds, "water_storage_summed_output", Float32, ("lon", "lat", "time"))
-
-
     water_storage_output = defVar(out_ds, "water_storage_output", Float32, ("lon", "lat", "time", "nveg"))
 
     # Set attributes                     
     pr_scaled.attrib["units"]       = "mm/day"
     pr_scaled.attrib["description"] = "Daily precipitation scaled with GPU computations (optimized)"
 
-    return out_ds, pr_scaled, water_storage_output, water_storage_summed_output
+    return out_ds, pr_scaled, water_storage_output
 end
 
 const static_input_loaded = Ref(false)
