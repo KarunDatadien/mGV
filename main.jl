@@ -3,8 +3,10 @@ include("constants.jl")
 include("utils.jl")
 include("io.jl")
 include("init.jl")
+include("init_calc.jl")
 include("physics.jl")
 include("evapotranspiration.jl")
+include("groundwater.jl")
 
 using .SimConstants
 println("Loading parameter data and allocating memory...")
@@ -30,9 +32,19 @@ end
 global water_storage = CUDA.fill(Float32(0.1), size(coverage_gpu))  # Fill with 0.1 on GPU
 global throughfall   = CUDA.zeros(Float32, size(coverage_gpu))      # Allocate zeros on GPU
 
+global bulk_dens_min = CUDA.zeros(Float32, size(bulk_dens_gpu))      
+global soil_dens_min = CUDA.zeros(Float32, size(bulk_dens_gpu))      
+global porosity      = CUDA.zeros(Float32, size(bulk_dens_gpu))      
+global soil_moisture_max = CUDA.zeros(Float32, size(soil_dens_gpu))      
+
 function process_year(year)
-    global water_storage  # Ensure we're modifying the global variable
-    global throughfall  # Ensure we're modifying the global variable
+    global water_storage  # Ensure we're modifying the global variables
+    global throughfall  
+
+    global bulk_dens_min
+    global soil_dens_min
+    global porosity
+    global soil_moisture_max
 
     println("============ Start run for year: $year ============")
     println("Loading forcing data and allocating memory...")
@@ -59,8 +71,12 @@ function process_year(year)
         
         if GPU_USE == true
             # Explicitly copy preloaded data to the GPU
-            gpu_load_static_inputs([rmin_cpu, rarc_cpu, elev_cpu], 
-                                   [rmin_gpu, rarc_gpu, elev_gpu])
+            gpu_load_static_inputs([rmin_cpu, rarc_cpu, elev_cpu, root_cpu, 
+                                    Wcr_cpu, Wfc_cpu, Wpwp_cpu, depth_cpu, 
+                                    bulk_dens_cpu, soil_dens_cpu], 
+                                   [rmin_gpu, rarc_gpu, elev_gpu, root_gpu, 
+                                    Wcr_gpu, Wfc_gpu, Wpwp_gpu, depth_gpu, 
+                                    bulk_dens_gpu, soil_dens_gpu])
             gpu_load_monthly_inputs(month, month_prev, 
                                     [d0_cpu, z0_cpu, LAI_cpu, albedo_cpu, coverage_cpu], 
                                     [d0_gpu, z0_gpu, LAI_gpu, albedo_gpu, coverage_gpu])
@@ -97,28 +113,45 @@ function process_year(year)
             )
 
             # Uncomment if needed:
-            # transpiration = calculate_transpiration(
-            #     potential_evaporation, aerodynamic_resistance, rarc_gpu, canopy_resistance, 
-            #     W_i, W_im, soil_moisture_old, soil_moisture_critical, wilting_point, 
-            #     root_fract_layer1, root_fract_layer2
-            # )
+            transpiration = calculate_transpiration(
+                potential_evaporation, aerodynamic_resistance, rarc_gpu, canopy_resistance, 
+                W_i, W_im, soil_moisture_old, soil_moisture_critical, wilting_point, 
+                root_fract_layer1, root_fract_layer2
+            )
             
             # === Update Water Storage ===
             throughfall .= 0
-            #println("WATER STORAGE SIZE:", size(water_storage)) 
-            #println("PREC GPU SIZE:", size(prec_gpu))
-            #println("POTENTIAL EVAPORATION SIZE:", size(potential_evaporation)) 
-
-            water_storage .+= (prec_gpu .- potential_evaporation)
-            #println("WATER STORAGE SIZE:", size(water_storage)) 
-            #println("MAX WATER STORAGE SIZE:", size(max_water_storage)) 
-
-            # Ensure water_storage stays within valid bounds
+            water_storage .+= (prec_gpu .- canopy_evaporation)
             water_storage .= clamp.(water_storage, 0, max_water_storage)
-            
-            # Compute throughfall
-            throughfall = max.(0, water_storage .- max_water_storage)
+            throughfall = max.(0, water_storage .- max_water_storage)             # Compute throughfall
+        
+            ## Drainage from layer 1 to 2; Q12
+            #Q12 = Ksat*((soil_moisture_old - residual_moisture)/(soil_moisture_max[0,:,:] - residual_moisture))**(expt) #Exponent n (=3+2/lambda) in Campbells eqn for hydraulic conductivity, HBH 5.6 (where lambda = soil pore size distribution parameter).  Values should be > 3.0
+    
+            ## Calculate intermediate values
+            #precipitation_term = current_precipitation * time_step_placeholder
+    
+            ## Water balance layer 1 and direct surface runoff
+            #Q_surface = gw.calculate_Q_surface(current_precipitation, time_step_placeholder, soil_moisture_max[0,:,:], soil_moisture_old[0,:,:], i_0, max_infil)
+    
+            #soil_moisture_new[0,:,:] = soil_moisture_old[0,:,:] + (current_precipitation - Q_surface[0,:,:] - Q12[0,:,:] - E1)*time_step_placeholder
+    
+            ## Water balance layer 2 and subsurface runoff
+            #E2 = 0 # Liang et al.: "Evaporation from bare soil is extracted only from layer 1; bare soil evaporation from layer 2 (E2) is assumed to be zero."
+            #Q_subsurface = gw.calculate_Q_subsurface(Ds, Dsmax, soil_moisture_old[1,:,:], Ws, soil_moisture_max[1,:,:], soil_moisture_old[1,:,:])
+            #soil_moisture_new[1,:,:] = soil_moisture_old[1,:,:] + (Q12[1,:,:] - Q_subsurface - E2)*time_step_placeholder
+    
+            #E_n = canopy_evaporation + transpiration
+    
+            ice_frac = 0
 
+            ## Placeholders:
+            # T1_layer_temp = tair_gpu
+            # T2_layer_temp = tair_gpu
+    
+            kappa_array = soil_conductivity(soil_moisture_new, ice_frac, soil_dens_min, bulk_dens_min, quartz, soil_dens_gpu, bulk_dens_gpu, organic_frac, porosity)
+            Cs_array = volumetric_heat_capacity(bulk_dens_gpu ./ soil_dens_gpu, soil_moisture_new, ice_frac, organic_frac)
+        
             # Write results to the NetCDF file from the GPU
             #water_storage_summed_output[:, :, day] = Array(sum(water_storage; dims=4)[:, :, :, 1])
             water_storage_output[:, :, day, :] = Array(water_storage)
