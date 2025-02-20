@@ -57,12 +57,10 @@ function read_and_allocate_parameter(varname::String)
     # 2) Conditionally allocate a GPU array
     if GPU_USE
         # Adjust dimensions for the GPU array
-        adjusted_dims = if length(var_dims) == 3
-            (var_dims[1], var_dims[2], var_dims[3])
-        elseif length(var_dims) == 4
-            (var_dims[1], var_dims[2], 1, var_dims[4])  # Third dimension is reduced to 1
+        adjusted_dims = if length(var_dims) == 4
+            (var_dims[1], var_dims[2], (var_dims[3] == 12 ? 1 : var_dims[3]), var_dims[4])  # Third dimension is reduced to 1 if time dimension (i.e. months)
         else
-            var_dims  # For 2D or other cases, keep original dimensions
+            var_dims  # For 2D or 3D cases, keep original dimensions
         end
 
         gpu_arr = CUDA.zeros(Float32, adjusted_dims...)  # Allocate based on adjusted dimensions
