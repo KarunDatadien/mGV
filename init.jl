@@ -9,13 +9,13 @@ if CASE == "global"
     # =========================== GLOBAL CONFIGURATION ===========================
         
     # Input file paths/names
-    input_param_file       = "./global_data/vic_global_5min_params_fix2.nc"
-    input_prec_prefix      = "./global_data/5arcmin/forcing/prec/prec_WFDE5_CRU+GPCC_v2.0_5arcmin_"
-    input_tair_prefix      = "./global_data/5arcmin/forcing/tair/tair_WFDE5_v2.0_5arcmin_"
-    input_wind_prefix      = "./global_data/5arcmin/forcing/wind/wind_WFDE5_v2.0_5arcmin_"
-    input_vp_prefix        = "./global_data/5arcmin/forcing/vp/vp_WFDE5_v2.0_5arcmin_"
-    input_swdown_prefix    = "./global_data/5arcmin/forcing/swdown/swdown_WFDE5_v2.0_5arcmin_"
-    input_lwdown_prefix    = "./global_data/5arcmin/forcing/lwdown/lwdown_WFDE5_v2.0_5arcmin_"
+    input_param_file       = "./input_data/global/vic_global_5min_params_fix2.nc"
+    input_prec_prefix      = "./input_data/global/5arcmin/forcing/prec/prec_WFDE5_CRU+GPCC_v2.0_5arcmin_"
+    input_tair_prefix      = "./input_data/global/5arcmin/forcing/tair/tair_WFDE5_v2.0_5arcmin_"
+    input_wind_prefix      = "./input_data/global/5arcmin/forcing/wind/wind_WFDE5_v2.0_5arcmin_"
+    input_vp_prefix        = "./input_data/global/5arcmin/forcing/vp/vp_WFDE5_v2.0_5arcmin_"
+    input_swdown_prefix    = "./input_data/global/5arcmin/forcing/swdown/swdown_WFDE5_v2.0_5arcmin_"
+    input_lwdown_prefix    = "./input_data/global/5arcmin/forcing/lwdown/lwdown_WFDE5_v2.0_5arcmin_"
     
     # Input variable names (as specified in the input files' metadata)
     d0_var = "displacement"
@@ -24,6 +24,8 @@ if CASE == "global"
     rmin_var = "rmin"
     rarc_var = "rarc"
     elev_var = "elev"
+    residmoist_var = "resid_moist"
+    ksat_var = "Ksat"
     albedo_var = "albedo"
     root_var = "root_fract" # root_fract(veg_class, root_zone, lat, lon) ;
     #root_fract_layer1 = root_fract[:, 0, :, :]
@@ -34,6 +36,7 @@ if CASE == "global"
     Wfc_var = "Wfc_FRACT" #Wfc_FRACT(nlayer, lat, lon) 
     Wpwp_var = "Wpwp_FRACT" #Wpwp_FRACT(nlayer, lat, lon) 
     coverage_var = "fcanopy" #fcanopy(veg_class, month, lat, lon) # "canopy coverage"
+    quartz_var = "quartz" #quartz(nlayer, lat, lon)
 
     # === Extract Soil Parameters ===
     depth_var = "depth" #depth(nlayer, lat, lon)
@@ -48,7 +51,7 @@ if CASE == "global"
     lwdown_var = "lwdown"
 
     # Output file paths/names
-    output_dir             = "./output/"
+    output_dir             = "./output/global/"
     output_file_prefix     = "outputfile_global_"
     
     # Set default simulation years if no command-line arguments are provided
@@ -67,14 +70,14 @@ elseif CASE == "indus"
     # ============================ INDUS CONFIGURATION ============================
    
     # Input file paths/names
-    input_param_file       = "./indus_data/VIC_params_Mirca_calibrated_Indus.nc"
-    input_prec_prefix      = "./indus_data/pr_daily_GFDL-ESM4adj_historical/pr_daily_GFDL-ESM4adj_historical_"
-    input_tair_prefix      = "./indus_data/tas_daily_GFDL-ESM4adj_historical/tas_daily_GFDL-ESM4adj_historical_"
-    input_wind_prefix      = "./indus_data/wind10_daily_GFDL-ESM4_historical/wind10_daily_GFDL-ESM4_historical_"
-    input_vp_prefix        = "./indus_data/vp_daily_GFDL-ESM4_historical/vp_daily_GFDL-ESM4_historical_"
-    input_swdown_prefix    = "./indus_data/swdown_daily_GFDL-ESM4adj_historical/swdown_daily_GFDL-ESM4adj_historical_"
-    input_lwdown_prefix    = "./indus_data/lwdown_daily_GFDL-ESM4adj_historical/lwdown_daily_GFDL-ESM4adj_historical_"
-    # input_psurf_prefix     = "./indus_data/psurf_daily_GFDL-ESM4_historical/psurf_daily_GFDL-ESM4_historical_"
+    input_param_file       = "./input_data/indus/VIC_params_Mirca_calibrated_Indus.nc"
+    input_prec_prefix      = "./input_data/indus/forcing/pr_daily_GFDL-ESM4adj_historical/pr_daily_GFDL-ESM4adj_historical_"
+    input_tair_prefix      = "./input_data/indus/forcing/tas_daily_GFDL-ESM4adj_historical/tas_daily_GFDL-ESM4adj_historical_"
+    input_wind_prefix      = "./input_data/indus/forcing/wind10_daily_GFDL-ESM4_historical/wind10_daily_GFDL-ESM4_historical_"
+    input_vp_prefix        = "./input_data/indus/forcing/vp_daily_GFDL-ESM4_historical/vp_daily_GFDL-ESM4_historical_"
+    input_swdown_prefix    = "./input_data/indus/forcing/swdown_daily_GFDL-ESM4adj_historical/swdown_daily_GFDL-ESM4adj_historical_"
+    input_lwdown_prefix    = "./input_data/indus/forcing/lwdown_daily_GFDL-ESM4adj_historical/lwdown_daily_GFDL-ESM4adj_historical_"
+    # input_psurf_prefix     = "./input_data/indus/forcing/psurf_daily_GFDL-ESM4_historical/psurf_daily_GFDL-ESM4_historical_"
     
     # Input variable names (as specified in the input files' metadata)
     d0_var = "displacement"
@@ -83,6 +86,8 @@ elseif CASE == "indus"
     rmin_var = "rmin"
     rarc_var = "rarc"
     elev_var = "elev"
+    residmoist_var = "resid_moist"
+    ksat_var = "Ksat"
     albedo_var = "albedo"
     root_var = "root_fract" # root_fract(veg_class, root_zone, lat, lon) ;
 
@@ -94,6 +99,7 @@ elseif CASE == "indus"
     Wfc_var = "Wfc_FRACT" #Wfc_FRACT(nlayer, lat, lon) 
     Wpwp_var = "Wpwp_FRACT" #Wpwp_FRACT(nlayer, lat, lon) 
     coverage_var = "fcanopy" #fcanopy(veg_class, month, lat, lon) # "canopy coverage"
+    quartz_var = "quartz" #quartz(nlayer, lat, lon)
 
     # === Extract Soil Parameters ===
     depth_var = "depth" #depth(nlayer, lat, lon)
@@ -108,7 +114,7 @@ elseif CASE == "indus"
     lwdown_var = "lwdown"
 
     # Output file paths/names
-    output_dir             = "./output_indus/"
+    output_dir             = "./output/indus/"
     output_file_prefix     = "outputfile_indus_"
     
     # Set default simulation years if no command-line arguments are provided

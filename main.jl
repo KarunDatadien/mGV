@@ -10,22 +10,26 @@ include("groundwater.jl")
 
 using .SimConstants
 println("Loading parameter data and allocating memory...")
+
 @time begin
-    (d0_cpu,        d0_gpu)        = read_and_allocate_parameter(d0_var)
-    (z0_cpu,        z0_gpu)        = read_and_allocate_parameter(z0_var)
-    (LAI_cpu,       LAI_gpu)       = read_and_allocate_parameter(LAI_var)
-    (albedo_cpu,    albedo_gpu)    = read_and_allocate_parameter(albedo_var) 
-    (rmin_cpu,      rmin_gpu)      = read_and_allocate_parameter(rmin_var) 
-    (rarc_cpu,      rarc_gpu)      = read_and_allocate_parameter(rarc_var) 
-    (elev_cpu,      elev_gpu)      = read_and_allocate_parameter(elev_var) 
-    (root_cpu,      root_gpu)      = read_and_allocate_parameter(root_var) # change how this is loaded: Full size of root_fract: (4320, 1680, 3, 14), Allocated GPU array of size: (4320, 1680, 1, 14)
-    (Wcr_cpu,       Wcr_gpu)       = read_and_allocate_parameter(Wcr_var)
-    (Wfc_cpu,       Wfc_gpu)       = read_and_allocate_parameter(Wfc_var)
-    (Wpwp_cpu,      Wpwp_gpu)      = read_and_allocate_parameter(Wpwp_var)
-    (depth_cpu,     depth_gpu)     = read_and_allocate_parameter(depth_var)
-    (bulk_dens_cpu, bulk_dens_gpu) = read_and_allocate_parameter(bulk_dens_var)
-    (soil_dens_cpu, soil_dens_gpu) = read_and_allocate_parameter(soil_dens_var)
-    (coverage_cpu,  coverage_gpu)  = read_and_allocate_parameter(coverage_var)
+    (d0_cpu,         d0_gpu)         = read_and_allocate_parameter(d0_var)
+    (z0_cpu,         z0_gpu)         = read_and_allocate_parameter(z0_var)
+    (LAI_cpu,        LAI_gpu)        = read_and_allocate_parameter(LAI_var)
+    (albedo_cpu,     albedo_gpu)     = read_and_allocate_parameter(albedo_var) 
+    (rmin_cpu,       rmin_gpu)       = read_and_allocate_parameter(rmin_var) 
+    (rarc_cpu,       rarc_gpu)       = read_and_allocate_parameter(rarc_var) 
+    (elev_cpu,       elev_gpu)       = read_and_allocate_parameter(elev_var) 
+    (ksat_cpu,       ksat_gpu)       = read_and_allocate_parameter(ksat_var) 
+    (residmoist_cpu, residmoist_gpu) = read_and_allocate_parameter(residmoist_var) 
+    (root_cpu,       root_gpu)       = read_and_allocate_parameter(root_var) # change how this is loaded: Full size of root_fract: (4320, 1680, 3, 14), Allocated GPU array of size: (4320, 1680, 1, 14)
+    (Wcr_cpu,        Wcr_gpu)        = read_and_allocate_parameter(Wcr_var)
+    (Wfc_cpu,        Wfc_gpu)        = read_and_allocate_parameter(Wfc_var)
+    (Wpwp_cpu,       Wpwp_gpu)       = read_and_allocate_parameter(Wpwp_var)
+    (depth_cpu,      depth_gpu)      = read_and_allocate_parameter(depth_var)
+    (quartz_cpu,     quartz_gpu)     = read_and_allocate_parameter(quartz_var)
+    (bulk_dens_cpu,  bulk_dens_gpu)  = read_and_allocate_parameter(bulk_dens_var)
+    (soil_dens_cpu,  soil_dens_gpu)  = read_and_allocate_parameter(soil_dens_var)
+    (coverage_cpu,   coverage_gpu)   = read_and_allocate_parameter(coverage_var)
 end
 
 # === Initial States ===
@@ -35,7 +39,12 @@ global throughfall   = CUDA.zeros(Float32, size(coverage_gpu))      # Allocate z
 global bulk_dens_min = CUDA.zeros(Float32, size(bulk_dens_gpu))      
 global soil_dens_min = CUDA.zeros(Float32, size(bulk_dens_gpu))      
 global porosity      = CUDA.zeros(Float32, size(bulk_dens_gpu))      
+global soil_moisture_new = CUDA.zeros(Float32, size(soil_dens_gpu))      
 global soil_moisture_max = CUDA.zeros(Float32, size(soil_dens_gpu))      
+
+# === Calculate Soil Properties ===
+porosity, soil_moisture_max, soil_moisture_critical, field_capacity, wilting_point = 
+    calculate_soil_properties(bulk_dens_gpu, soil_dens_gpu, depth_gpu, Wcr_gpu, Wfc_gpu, Wpwp_gpu)
 
 function process_year(year)
     global water_storage  # Ensure we're modifying the global variables
@@ -44,6 +53,7 @@ function process_year(year)
     global bulk_dens_min
     global soil_dens_min
     global porosity
+    global soil_moisture_new
     global soil_moisture_max
 
     println("============ Start run for year: $year ============")
@@ -77,6 +87,9 @@ function process_year(year)
                                    [rmin_gpu, rarc_gpu, elev_gpu, root_gpu, 
                                     Wcr_gpu, Wfc_gpu, Wpwp_gpu, depth_gpu, 
                                     bulk_dens_gpu, soil_dens_gpu])
+            
+            reshape_static_inputs!()
+
             gpu_load_monthly_inputs(month, month_prev, 
                                     [d0_cpu, z0_cpu, LAI_cpu, albedo_cpu, coverage_cpu], 
                                     [d0_gpu, z0_gpu, LAI_gpu, albedo_gpu, coverage_gpu])
@@ -112,11 +125,12 @@ function process_year(year)
                 water_storage, max_water_storage, LAI_gpu, potential_evaporation, aerodynamic_resistance, rarc_gpu, prec_gpu
             )
 
-            # Uncomment if needed:
+            soil_moisture_old = soil_moisture_new
+
             transpiration = calculate_transpiration(
                 potential_evaporation, aerodynamic_resistance, rarc_gpu, canopy_resistance, 
-                W_i, W_im, soil_moisture_old, soil_moisture_critical, wilting_point, 
-                root_fract_layer1, root_fract_layer2
+                water_storage, max_water_storage, soil_moisture_old, soil_moisture_critical, wilting_point, 
+                root_gpu
             )
             
             # === Update Water Storage ===
@@ -126,6 +140,11 @@ function process_year(year)
             throughfall = max.(0, water_storage .- max_water_storage)             # Compute throughfall
         
             ## Drainage from layer 1 to 2; Q12
+            println("Size of soil_moisture_old: ", size(soil_moisture_old))
+            println("Size of residual_moisture: ", size(residmoist_gpu))
+            println("Size of soil_moisture_max: ", size(soil_moisture_max))
+            Q12 = ksat_gpu .* ((soil_moisture_old .- residmoist_gpu) ./ (soil_moisture_max[1, :, :] .- residmoist_gpu)) .^ expt
+
             #Q12 = Ksat*((soil_moisture_old - residual_moisture)/(soil_moisture_max[0,:,:] - residual_moisture))**(expt) #Exponent n (=3+2/lambda) in Campbells eqn for hydraulic conductivity, HBH 5.6 (where lambda = soil pore size distribution parameter).  Values should be > 3.0
     
             ## Calculate intermediate values
@@ -149,7 +168,7 @@ function process_year(year)
             # T1_layer_temp = tair_gpu
             # T2_layer_temp = tair_gpu
     
-            kappa_array = soil_conductivity(soil_moisture_new, ice_frac, soil_dens_min, bulk_dens_min, quartz, soil_dens_gpu, bulk_dens_gpu, organic_frac, porosity)
+            kappa_array = soil_conductivity(soil_moisture_new, ice_frac, soil_dens_min, bulk_dens_min, quartz_gpu, soil_dens_gpu, bulk_dens_gpu, organic_frac, porosity)
             Cs_array = volumetric_heat_capacity(bulk_dens_gpu ./ soil_dens_gpu, soil_moisture_new, ice_frac, organic_frac)
         
             # Write results to the NetCDF file from the GPU

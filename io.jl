@@ -125,6 +125,35 @@ function gpu_load_static_inputs(cpu_vars, gpu_vars)
     end
 end
 
+function reshape_static_inputs!()
+    global rmin_gpu, rarc_gpu
+
+    # Check and reshape rmin_gpu if it has 3 dimensions.
+    if ndims(rmin_gpu) == 3
+        rmin_gpu = CUDA.reshape(rmin_gpu,
+                                size(rmin_gpu, 1),
+                                size(rmin_gpu, 2),
+                                1,
+                                size(rmin_gpu, 3))
+        println("rmin_gpu reshaped to: ", size(rmin_gpu))
+    else
+        println("rmin_gpu already has ", ndims(rmin_gpu), " dimensions; no reshape needed.")
+    end
+
+    # Check and reshape rarc_gpu if it has 3 dimensions.
+    if ndims(rarc_gpu) == 3
+        rarc_gpu = CUDA.reshape(rarc_gpu,
+                                size(rarc_gpu, 1),
+                                size(rarc_gpu, 2),
+                                1,
+                                size(rarc_gpu, 3))
+        println("rarc_gpu reshaped to: ", size(rarc_gpu))
+    else
+        println("rarc_gpu already has ", ndims(rarc_gpu), " dimensions; no reshape needed.")
+    end
+end
+
+
 function gpu_load_monthly_inputs(month, month_prev, cpu_vars, gpu_vars)
     if month != month_prev
         for (cpu, gpu) in zip(cpu_vars, gpu_vars)
