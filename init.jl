@@ -42,6 +42,7 @@ if CASE == "global"
     depth_var = "depth" #depth(nlayer, lat, lon)
     bulk_dens_var = "bulk_density" #bulk_density(nlayer, lat, lon)
     soil_dens_var = "soil_density" #soil_density(nlayer, lat, lon) 
+    expt_var = "expt"
 
     prec_var = "prec"
     tair_var = "tair"
@@ -90,7 +91,6 @@ elseif CASE == "indus"
     ksat_var = "Ksat"
     albedo_var = "albedo"
     root_var = "root_fract" # root_fract(veg_class, root_zone, lat, lon) ;
-
     #root_fract_layer1 = root_fract[:, 0, :, :]
     #root_fract_layer2 = root_fract[:, 1, :, :]
     
@@ -105,6 +105,7 @@ elseif CASE == "indus"
     depth_var = "depth" #depth(nlayer, lat, lon)
     bulk_dens_var = "bulk_density" #bulk_density(nlayer, lat, lon)
     soil_dens_var = "soil_density" #soil_density(nlayer, lat, lon) 
+    expt_var = "expt"
 
     prec_var = "pr"
     tair_var = "tas"
