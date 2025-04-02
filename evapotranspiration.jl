@@ -1,7 +1,21 @@
 function compute_aerodynamic_resistance(z2, d0_gpu, z0_gpu, K, tsurf, tair_gpu, wind_gpu)
     # Compute a²[n] and c
+
+    d0_gpu = ifelse.(d0_gpu .> 1e20, 2.0f0, d0_gpu)
+    z0_gpu = ifelse.(z0_gpu .> 1e20, 2.0f0, z0_gpu)
+    
+
     a_squared = (K^2) ./ (log.((z2 .- d0_gpu) ./ z0_gpu).^2)
-    c_coefficient = 49.82f0 .* a_squared .* sqrt.((z2 .- d0_gpu) ./ z0_gpu)
+
+    println("LOG TERM!: ", minimum(log.((z2 .- d0_gpu) ./ z0_gpu)), " / ", maximum(log.((z2 .- d0_gpu) ./ z0_gpu)))
+    println("z2: ", minimum(z2), " / ", maximum(z2))
+    println("K: ", minimum(K), " / ", maximum(K))
+    println("d0_gpu: ", minimum(d0_gpu), " / ", maximum(d0_gpu))
+    println("z0_gpu: ", minimum(z0_gpu), " / ", maximum(z0_gpu))
+
+
+
+    c_coefficient = 49.82 .* a_squared .* sqrt.((z2 .- d0_gpu) ./ z0_gpu)
     
     # Compute Richardson number
     # NOTE:
@@ -28,6 +42,15 @@ function compute_aerodynamic_resistance(z2, d0_gpu, z0_gpu, K, tsurf, tair_gpu, 
     transfer_coefficient = 1.351 .* a_squared .* Fw
     aerodynamic_resistance = 1 ./ (transfer_coefficient .* wind_gpu)
 
+    println("a_squared: ", minimum(a_squared), " / ", maximum(a_squared))
+    println("Fw: ", minimum(Fw), " / ", maximum(Fw))
+
+    println("transfer_coefficient: ", minimum(transfer_coefficient), " / ", maximum(transfer_coefficient))
+    println("wind_gpu: ", minimum(wind_gpu), " / ", maximum(wind_gpu))
+
+
+    println("aerodynamic_resistance: ", minimum(aerodynamic_resistance), " / ", maximum(aerodynamic_resistance))
+
     return aerodynamic_resistance
 end
 
@@ -44,21 +67,22 @@ function calculate_net_radiation(swdown_gpu, lwdown_gpu, albedo_gpu, tsurf)
 end
 
 function calculate_potential_evaporation(tair_gpu, vp_gpu, elev_gpu, net_radiation, aerodynamic_resistance, rc, rarc_gpu)
-
+    # Compute intermediate variables
     vpd = calculate_vpd(tair_gpu,vp_gpu)
     slope = calculate_svp_slope(tair_gpu)
     latent_heat = calculate_latent_heat(tair_gpu)
     scale_height = calculate_scale_height(tair_gpu, elev_gpu)
 
     surface_pressure = p_std .* exp.(-elev_gpu ./ scale_height)
-    
     psychrometric_constant = 1628.6 .* surface_pressure ./ latent_heat
     air_density = 0.003486 .* surface_pressure ./ (275 .+ tair_gpu)
     
-    # Penman-Monteith equation
-    potential_evaporation = (slope .* net_radiation .+ air_density .* c_p_air .* vpd ./ aerodynamic_resistance) ./ 
-                            (latent_heat .* (slope .+ psychrometric_constant .* (1 .+ (rc .+ rarc_gpu) ./ aerodynamic_resistance))) .* day_sec
-    
+    # Penman-Monteith equation (mm/day)
+    numerator = slope .* net_radiation .+ (air_density .* c_p_air .* vpd ./ aerodynamic_resistance)
+    denominator = latent_heat .* (slope .+ psychrometric_constant .* (1 .+ (rc .+ rarc_gpu) ./ aerodynamic_resistance))
+
+    potential_evaporation = numerator ./ denominator .* day_sec
+
     # Ensure evaporation is non-negative when vapor pressure deficit is positive
     potential_evaporation = ifelse.((vpd .>= 0.0) .& (potential_evaporation .< 0.0), 0.0, potential_evaporation)
     
