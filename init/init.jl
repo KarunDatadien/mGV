@@ -54,7 +54,7 @@ if CASE == "global"
     lwdown_var = "lwdown"
 
     # Output file paths/names
-    output_dir             = "./output/global/"
+    output_dir             = "./output_data/global/"
     output_file_prefix     = "outputfile_global_"
     
     # Set default simulation years if no command-line arguments are provided
@@ -119,7 +119,7 @@ elseif CASE == "indus"
     lwdown_var = "lwdown"
 
     # Output file paths/names
-    output_dir             = "./output/indus/"
+    output_dir             = "./output_data/indus/"
     output_file_prefix     = "outputfile_indus_"
     
     # Set default simulation years if no command-line arguments are provided

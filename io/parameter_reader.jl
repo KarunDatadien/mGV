@@ -61,10 +61,8 @@ function read_and_allocate_forcing(prefix::String, year::Int, varname::String)
 end
 
 function gpu_load_static_inputs(cpu_vars, gpu_vars)
-    if !static_input_loaded[]
-        for (cpu, gpu) in zip(cpu_vars, gpu_vars)
-            CUDA.copyto!(gpu, cpu)
-        end
+    for (cpu, gpu) in zip(cpu_vars, gpu_vars)
+        CUDA.copyto!(gpu, cpu)
     end
 end
 

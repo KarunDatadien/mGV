@@ -1,13 +1,26 @@
 include("packages.jl")
-include("constants.jl")
-include("utils.jl")
-include("io.jl")
-include("init.jl")
-include("init_calc.jl")
-include("physics.jl")
-include("evapotranspiration.jl")
-include("groundwater.jl")
-include("temperature.jl")
+
+# Constants
+include("constants/sim_constants.jl")
+include("constants/physical_constants.jl")
+
+# Utilities
+include("utils/runtime_utils.jl")
+
+# I/O
+include("io/io_helpers.jl")
+include("io/netcdf_writer.jl")
+include("io/parameter_reader.jl")
+
+# Initialization
+include("init/init.jl")
+include("init/init_calc.jl")
+
+# Physics Modules
+include("physics/physics.jl")
+include("physics/evapotranspiration.jl")
+include("physics/groundwater.jl")
+include("physics/temperature.jl")
 
 using .SimConstants
 println("Loading parameter data and allocating memory...")
