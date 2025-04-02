@@ -110,11 +110,20 @@ function create_output_netcdf(output_file::String, reference_array, reference_ar
 
     Q12_output = defVar(out_ds, "Q12_output", Float32, ("lon", "lat", "time"))
 
+    tair_output = defVar(out_ds, "tair_output", Float32, ("lon", "lat", "time"))
+
+    tsurf_output = defVar(out_ds, "tsurf_output", Float32, ("lon", "lat", "time", "layer", "nveg"))
+
+    canopy_evaporation_output = defVar(out_ds, "canopy_evaporation_output", Float32, ("lon", "lat", "time", "nveg"))
+
+    transpiration_output = defVar(out_ds, "transpiration_output", Float32, ("lon", "lat", "time", "nveg"))
+
+
     # Set attributes                     
     pr_scaled.attrib["units"]       = "mm/day"
     pr_scaled.attrib["description"] = "Daily precipitation scaled with GPU computations (optimized)"
 
-    return out_ds, pr_scaled, water_storage_output, Q12_output
+    return out_ds, pr_scaled, water_storage_output, Q12_output, tair_output, tsurf_output, canopy_evaporation_output, transpiration_output
 end
 
 const static_input_loaded = Ref(false)

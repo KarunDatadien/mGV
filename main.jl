@@ -7,6 +7,7 @@ include("init_calc.jl")
 include("physics.jl")
 include("evapotranspiration.jl")
 include("groundwater.jl")
+include("temperature.jl")
 
 using .SimConstants
 println("Loading parameter data and allocating memory...")
@@ -21,6 +22,7 @@ println("Loading parameter data and allocating memory...")
     (elev_cpu,       elev_gpu)       = read_and_allocate_parameter(elev_var) 
     (ksat_cpu,       ksat_gpu)       = read_and_allocate_parameter(ksat_var) 
     (residmoist_cpu, residmoist_gpu) = read_and_allocate_parameter(residmoist_var) 
+    (init_moist_cpu, init_moist_gpu) = read_and_allocate_parameter(init_moist_var) 
     (root_cpu,       root_gpu)       = read_and_allocate_parameter(root_var) 
     (Wcr_cpu,        Wcr_gpu)        = read_and_allocate_parameter(Wcr_var)
     (Wfc_cpu,        Wfc_gpu)        = read_and_allocate_parameter(Wfc_var)
@@ -36,24 +38,26 @@ end
 # === Initial States ===
 global water_storage = CUDA.fill(Float32(0.1), size(coverage_gpu))  # Fill with 0.1 on GPU
 global throughfall   = CUDA.zeros(Float32, size(coverage_gpu))      # Allocate zeros on GPU
-
 global bulk_dens_min = CUDA.zeros(Float32, size(bulk_dens_gpu))      
 global soil_dens_min = CUDA.zeros(Float32, size(bulk_dens_gpu))      
 global porosity      = CUDA.zeros(Float32, size(bulk_dens_gpu))      
 global soil_moisture_new = CUDA.zeros(Float32, size(soil_dens_gpu))      
 global soil_moisture_max = CUDA.zeros(Float32, size(soil_dens_gpu))      
 
-gpu_load_static_inputs([rmin_cpu, rarc_cpu, elev_cpu, ksat_cpu, residmoist_cpu, root_cpu,
+
+gpu_load_static_inputs([rmin_cpu, rarc_cpu, elev_cpu, ksat_cpu, residmoist_cpu, init_moist_cpu, root_cpu,
                         Wcr_cpu, Wfc_cpu, Wpwp_cpu, depth_cpu, quartz_cpu,
                         bulk_dens_cpu, soil_dens_cpu, expt_cpu],
-                       [rmin_gpu, rarc_gpu, elev_gpu, ksat_gpu, residmoist_gpu, root_gpu,
+                       [rmin_gpu, rarc_gpu, elev_gpu, ksat_gpu, residmoist_gpu, init_moist_gpu, root_gpu,
                         Wcr_gpu, Wfc_gpu, Wpwp_gpu, depth_gpu, quartz_gpu,
                         bulk_dens_gpu, soil_dens_gpu, expt_gpu])
 
 reshape_static_inputs!()
 
+soil_moisture_new = init_moist_gpu
+
 # === Calculate Soil Properties ===
-porosity, soil_moisture_max, soil_moisture_critical, field_capacity, wilting_point = 
+bulk_dens_min, soil_dens_min, porosity, soil_moisture_max, soil_moisture_critical, field_capacity, wilting_point = 
     calculate_soil_properties(bulk_dens_gpu, soil_dens_gpu, depth_gpu, Wcr_gpu, Wfc_gpu, Wpwp_gpu)
 
 function process_year(year)
@@ -79,7 +83,7 @@ function process_year(year)
 
     println("Opening output file...")
     output_file = joinpath(output_dir, "$(output_file_prefix)$(year).nc")
-    @time out_ds, prec_scaled, water_storage_output, Q12_output = create_output_netcdf(output_file, prec_cpu, LAI_cpu)
+    @time out_ds, prec_scaled, water_storage_output, Q12_output, tair_output, tsurf_output, canopy_evaporation_output, transpiration_output = create_output_netcdf(output_file, prec_cpu, LAI_cpu)
 
     println("Running...") 
     num_days = size(prec_cpu, 3)
@@ -103,9 +107,9 @@ function process_year(year)
 
             aerodynamic_resistance = compute_aerodynamic_resistance(
                 z2, d0_gpu, z0_gpu, K, tsurf, tair_gpu, wind_gpu
-            )
+            ) # Eq. (3) to check
 
-            canopy_resistance = compute_canopy_resistance(rmin_gpu, LAI_gpu)
+            canopy_resistance = compute_canopy_resistance(rmin_gpu, LAI_gpu) # Eq. (6), to check
 
             net_radiation = calculate_net_radiation(
                 swdown_gpu, lwdown_gpu, albedo_gpu, tsurf
@@ -118,13 +122,13 @@ function process_year(year)
             potential_evaporation = calculate_potential_evaporation(
                 tair_gpu, vp_gpu, elev_gpu, net_radiation, 
                 aerodynamic_resistance, canopy_resistance, rarc_gpu
-            )
+            ) # Penmann-Monteith equation, to check more precisely
 
-            max_water_storage = calculate_max_water_storage(LAI_gpu)
+            max_water_storage = calculate_max_water_storage(LAI_gpu) # Eq. (2), checked
 
             canopy_evaporation = calculate_canopy_evaporation(
                 water_storage, max_water_storage, LAI_gpu, potential_evaporation, aerodynamic_resistance, rarc_gpu, prec_gpu
-            )
+            ) #Eq. (1), (9) and (10), to check: Eq. (10)
 
             soil_moisture_old = soil_moisture_new
 
@@ -158,20 +162,51 @@ function process_year(year)
             #E2 = 0 # Liang et al.: "Evaporation from bare soil is extracted only from layer 1; bare soil evaporation from layer 2 (E2) is assumed to be zero."
             #Q_subsurface = gw.calculate_Q_subsurface(Ds, Dsmax, soil_moisture_old[1,:,:], Ws, soil_moisture_max[1,:,:], soil_moisture_old[1,:,:])
             #soil_moisture_new[1,:,:] = soil_moisture_old[1,:,:] + (Q12[1,:,:] - Q_subsurface - E2)*time_step_placeholder
-    
-            #E_n = canopy_evaporation + transpiration
+            println("canopy_evaporation: ", size(canopy_evaporation))
+            println("transpiration: ", size(transpiration))
+
+            E_n = canopy_evaporation + transpiration
     
             ice_frac = 0
 
             ## Placeholders:
-            # T1_layer_temp = tair_gpu
-            # T2_layer_temp = tair_gpu
+            soil_temp1_gpu = copy(tair_gpu)
+            soil_temp2_gpu = copy(tair_gpu)            
     
             kappa_array = soil_conductivity(soil_moisture_new, ice_frac, soil_dens_min, bulk_dens_min, quartz_gpu, soil_dens_gpu, bulk_dens_gpu, organic_frac, porosity)
+            println("kappa_array has NaN: ", any(isnan, kappa_array), " min/max: ", minimum(kappa_array), " / ", maximum(kappa_array))
+
+            
             Cs_array = volumetric_heat_capacity(bulk_dens_gpu ./ soil_dens_gpu, soil_moisture_new, ice_frac, organic_frac)
-        
+
+            tsurf = solve_surface_temperature(
+                tair_gpu,          # Air temperature (CuArray)
+                soil_temp1_gpu,    # Soil layer 1 temperature (CuArray)
+                soil_temp2_gpu,    # Soil layer 2 temperature (CuArray)
+                albedo_gpu,        # Surface albedo (CuArray)
+                swdown_gpu,   # Rs: shortwave radiation (Float32)
+                lwdown_gpu,   # RL: longwave radiation (Float32)
+                aerodynamic_resistance, # Aerodynamic resistance (CuArray)
+                kappa_array,         # Thermal conductivity (CuArray)
+                0.1,             # D1 (layer 1 depth in meters)
+                0.4,             # D2 (layer 2 depth in meters)
+                3600,            # delta_t (time step in seconds)
+                elev_gpu,          # Elevation (CuArray)
+                vp_gpu,            # Vapor pressure (CuArray)
+                Cs_array,
+                E_n
+            )
+
+            
             # Write results to the NetCDF file from the GPU
             #water_storage_summed_output[:, :, day] = Array(sum(water_storage; dims=4)[:, :, :, 1])
+            println("tsurf size: ", size(tsurf))
+            println("tair size: ", size(tair_gpu))
+
+            canopy_evaporation_output[:, :, day, :] = Array(canopy_evaporation)
+            transpiration_output[:, :, day, :] = Array(transpiration)
+            tair_output[:, :, day] = Array(tair_gpu)
+            tsurf_output[:, :, day, :, :] = Array(tsurf)
             water_storage_output[:, :, day, :] = Array(water_storage)
             prec_scaled[:, :, day] = Array(prec_gpu)
             Q12_output[:, :, day] = Array(Q12)

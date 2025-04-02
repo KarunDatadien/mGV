@@ -25,6 +25,8 @@ if CASE == "global"
     rarc_var = "rarc"
     elev_var = "elev"
     residmoist_var = "resid_moist"
+    init_moist_var = "init_moist"
+
     ksat_var = "Ksat"
     albedo_var = "albedo"
     root_var = "root_fract" # root_fract(veg_class, root_zone, lat, lon) ;
@@ -88,6 +90,8 @@ elseif CASE == "indus"
     rarc_var = "rarc"
     elev_var = "elev"
     residmoist_var = "resid_moist"
+    init_moist_var = "init_moist"
+
     ksat_var = "Ksat"
     albedo_var = "albedo"
     root_var = "root_fract" # root_fract(veg_class, root_zone, lat, lon) ;

@@ -16,5 +16,5 @@ function calculate_soil_properties(bulk_dens_gpu, soil_dens_gpu, depth_gpu, Wcr_
     field_capacity = Wfc_gpu .* soil_moisture_max
     wilting_point = Wpwp_gpu .* soil_moisture_max
 
-    return porosity, soil_moisture_max, soil_moisture_critical, field_capacity, wilting_point
+    return bulk_dens_min, soil_dens_min, porosity, soil_moisture_max, soil_moisture_critical, field_capacity, wilting_point
 end
