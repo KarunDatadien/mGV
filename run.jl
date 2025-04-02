@@ -1,6 +1,3 @@
-# Load user-modifiable configuration
-include("config/user_config.jl")
-
 # Load package definitions
 include("src/packages.jl")
 
@@ -24,6 +21,9 @@ include("src/physics/physics.jl")
 include("src/physics/evapotranspiration.jl")
 include("src/physics/groundwater.jl")
 include("src/physics/temperature.jl")
+
+# Load user-modifiable configuration
+include("config/user_config.jl")
 
 # Main program entry point
 include("src/main.jl")
