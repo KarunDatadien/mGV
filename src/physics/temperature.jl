@@ -42,10 +42,10 @@ function solve_surface_temperature(
 
     # === Define the residual function f(Ts_new) = lhs - rhs ===
     function f(Ts_new, Ts_old)
-        lhs = Main.emissivity .* Main.sigma .* Ts_old.^4 .+ common_term .* Ts_old
-        rhs = (1 .- albedo) .* Rs .+ Main.emissivity .* RL .+
-              (rho_a .* Main.c_p_air ./ rh) .* Ta .- rho_w .* Main.lat_vap .* E_n .+
-              (rho_a .* Main.c_p_air .* top_layer_depth .* Ts_new ./ (2 * delta_t)) .+
+        lhs = emissivity .* sigma .* Ts_new.^4 .+ common_term .* Ts_new
+        rhs = (1 .- albedo) .* Rs .+ emissivity .* RL .+
+              (rho_a .* c_p_air ./ rh) .* Ta .- rho_w .* lat_vap .* E_n .+ # TODO: check if I'm using the correct lat_vap
+              (rho_a .* c_p_air .* top_layer_depth .* Ts_old ./ (2 * delta_t)) .+
               ((kappa .* T2 ./ D2) .+ (Cs .* D2 .* T1 ./ (2 * delta_t))) ./ 
               (1 .+ (D1 / D2) .+ (Cs .* D1 .* D2 ./ (2 * delta_t .* kappa)))
         return lhs .- rhs
@@ -53,8 +53,9 @@ function solve_surface_temperature(
 
     # === Derivative of f(Ts_new) for Newton-Raphson ===
     function df_dTs_new(Ts_new, Ts_old)
-        # Only terms involving Ts_new contribute to the derivative
-        return (rho_a .* Main.c_p_air .* top_layer_depth ./ (2 * delta_t))
+        # Derivative w.r.t. Ts_new: d/dTs_new (emissivity * sigma * Ts_new^4 + common_term * Ts_new)
+        # = 4 * emissivity * sigma * Ts_new^3 + common_term
+        return 4 .* emissivity .* sigma .* Ts_new.^3 .+ common_term
     end
 
     # === Newton-Raphson solver ===
@@ -76,7 +77,7 @@ function solve_surface_temperature(
         min_delta = minimum(abs.(delta_Ts))
 
         println("Iteration $iter: Max delta Ts = $max_delta")
-        println("Iteration $iter: Max delta Ts = $min_delta")
+        println("Iteration $iter: Min delta Ts = $min_delta")
         if max_delta < tolerance
             println("Converged after $iter iterations")
             break
