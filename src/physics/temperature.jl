@@ -4,35 +4,35 @@ function solve_surface_temperature(
     D1, D2, delta_t, elev_gpu::CuArray,
     vp_gpu::CuArray, Cs::CuArray, E_n::CuArray
 )
-
-    # === Constants (check if these are globally defined!) ===
+    # === Constants (assumed globally defined in Main) ===
     @assert isdefined(Main, :lat_vap) "lat_vap is undefined"
     @assert isdefined(Main, :c_p_air) "c_p_air is undefined"
     @assert isdefined(Main, :emissivity) "emissivity is undefined"
     @assert isdefined(Main, :sigma) "sigma is undefined"
     @assert isdefined(Main, :p_std) "p_std is undefined"
+    
+    # Debugging prints (synchronize GPU before printing)
     println("Cs has NaN: ", any(isnan, Cs), " min/max: ", minimum(Cs), " / ", maximum(Cs))
     println("kappa has NaN: ", any(isnan, kappa), " min/max: ", minimum(kappa), " / ", maximum(kappa))
     println("rh has NaN: ", any(isnan, rh), " min/max: ", minimum(rh), " / ", maximum(rh))
-    
-    Ts = copy(Ta)  # Initial guess
-
-    println("Initial Ts min/max: ", minimum(Ts), " / ", maximum(Ts))
 
     # === Compute dependent quantities ===
     scale_height = calculate_scale_height(Ta, elev_gpu)
     surface_pressure = p_std .* exp.(-elev_gpu ./ scale_height)
-    latent_heat = calculate_latent_heat(Ta)
+    latent_heat = calculate_latent_heat(Ta) # should be with dimension W*m^-2
     rho_a = 0.003486 .* surface_pressure ./ (275 .+ Ta)
 
     println("rho_a min/max: ", minimum(rho_a), " / ", maximum(rho_a))
     println("latent_heat min/max: ", minimum(latent_heat), " / ", maximum(latent_heat))
 
+    # === Constants ===
+    top_layer_depth = 0.3
+    rho_w = 1000.0  # Density of liquid water
 
     # === Precompute constants ===
     base_term = (kappa ./ D2) .+ (Cs .* D2 ./ (2 * delta_t))
     heat_transfer_term = base_term ./ (1 .+ (D1 / D2) .+ (Cs .* D1 .* D2 ./ (2 * delta_t .* kappa)))
-    air_term = rho_a .* c_p_air ./ rh
+    air_term = (rho_a .* c_p_air ./ rh) .+ (rho_a .* c_p_air .* top_layer_depth ./ (2 * delta_t))
     common_term = heat_transfer_term .+ air_term
 
     println("base_term min/max: ", minimum(base_term), " / ", maximum(base_term))
@@ -40,24 +40,52 @@ function solve_surface_temperature(
     println("air_term min/max: ", minimum(air_term), " / ", maximum(air_term))
     println("common_term min/max: ", minimum(common_term), " / ", maximum(common_term))
 
-    for iter in 1:5
-        lhs = emissivity .* sigma .* Ts.^4 .+ common_term .* Ts
-
-        rhs = (1 .- albedo) .* Rs .+ emissivity .* RL .+
-              air_term .* Ta .- rho_a .* lat_vap .* E_n .+
+    # === Define the residual function f(Ts_new) = lhs - rhs ===
+    function f(Ts_new, Ts_old)
+        lhs = Main.emissivity .* Main.sigma .* Ts_old.^4 .+ common_term .* Ts_old
+        rhs = (1 .- albedo) .* Rs .+ Main.emissivity .* RL .+
+              (rho_a .* Main.c_p_air ./ rh) .* Ta .- rho_w .* Main.lat_vap .* E_n .+
+              (rho_a .* Main.c_p_air .* top_layer_depth .* Ts_new ./ (2 * delta_t)) .+
               ((kappa .* T2 ./ D2) .+ (Cs .* D2 .* T1 ./ (2 * delta_t))) ./ 
               (1 .+ (D1 / D2) .+ (Cs .* D1 .* D2 ./ (2 * delta_t .* kappa)))
-
-        f = lhs .- rhs
-        df = 4 .* emissivity .* sigma .* Ts.^3 .+ common_term
-
-        Ts_new = Ts .- f ./ df
-        if maximum(abs.(Ts_new .- Ts)) < 1e-3
-            break
-        end
-
-        Ts = Ts_new
+        return lhs .- rhs
     end
 
-    return Ts
+    # === Derivative of f(Ts_new) for Newton-Raphson ===
+    function df_dTs_new(Ts_new, Ts_old)
+        # Only terms involving Ts_new contribute to the derivative
+        return (rho_a .* Main.c_p_air .* top_layer_depth ./ (2 * delta_t))
+    end
+
+    # === Newton-Raphson solver ===
+    Ts_old = copy(Ta)  # Initial guess on GPU
+    Ts_new = copy(Ts_old)
+    tolerance = 1e-6
+    max_iter = 10
+
+    for iter in 1:max_iter
+        residual = f(Ts_new, Ts_old)
+        derivative = df_dTs_new(Ts_new, Ts_old)
+        
+        # Newton step: Ts_new = Ts_new - f(Ts_new) / f'(Ts_new)
+        delta_Ts = residual ./ derivative
+        Ts_new = Ts_new .- delta_Ts
+        
+        # Check convergence
+        max_delta = maximum(abs.(delta_Ts))
+        min_delta = minimum(abs.(delta_Ts))
+
+        println("Iteration $iter: Max delta Ts = $max_delta")
+        println("Iteration $iter: Max delta Ts = $min_delta")
+        if max_delta < tolerance
+            println("Converged after $iter iterations")
+            break
+        end
+        
+        # Update Ts_old for next iteration
+        Ts_old = Ts_new
+    end
+
+    return Ts_new
 end
+

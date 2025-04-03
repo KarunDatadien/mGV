@@ -1,10 +1,5 @@
 function compute_aerodynamic_resistance(z2, d0_gpu, z0_gpu, K, tsurf, tair_gpu, wind_gpu)
     # Compute a²[n] and c
-
-    d0_gpu = ifelse.(d0_gpu .> 1e20, 2.0f0, d0_gpu)
-    z0_gpu = ifelse.(z0_gpu .> 1e20, 2.0f0, z0_gpu)
-    
-
     a_squared = (K^2) ./ (log.((z2 .- d0_gpu) ./ z0_gpu).^2)
 
     println("LOG TERM!: ", minimum(log.((z2 .- d0_gpu) ./ z0_gpu)), " / ", maximum(log.((z2 .- d0_gpu) ./ z0_gpu)))
@@ -13,12 +8,10 @@ function compute_aerodynamic_resistance(z2, d0_gpu, z0_gpu, K, tsurf, tair_gpu, 
     println("d0_gpu: ", minimum(d0_gpu), " / ", maximum(d0_gpu))
     println("z0_gpu: ", minimum(z0_gpu), " / ", maximum(z0_gpu))
 
-
-
     c_coefficient = 49.82 .* a_squared .* sqrt.((z2 .- d0_gpu) ./ z0_gpu)
     
     # Compute Richardson number
-    # NOTE:
+    # NOTE TODO:
     # - Ri_B and Fw are currently allocated as Float64.
     # - It would be better to preallocate them at the beginning of the simulation as Float32
     #   (assuming all other arrays are also Float32).

@@ -26,10 +26,11 @@ function create_output_netcdf(output_file::String, reference_array, reference_ar
 
     transpiration_output = defVar(out_ds, "transpiration_output", Float32, ("lon", "lat", "time", "nveg"))
 
+    aerodynamic_resistance_output = defVar(out_ds, "aerodynamic_resistance_output", Float32, ("lon", "lat", "time", "nveg"))
 
     # Set attributes                     
     pr_scaled.attrib["units"]       = "mm/day"
     pr_scaled.attrib["description"] = "Daily precipitation scaled with GPU computations (optimized)"
 
-    return out_ds, pr_scaled, water_storage_output, Q12_output, tair_output, tsurf_output, canopy_evaporation_output, transpiration_output
+    return out_ds, pr_scaled, water_storage_output, Q12_output, tair_output, tsurf_output, canopy_evaporation_output, transpiration_output, aerodynamic_resistance_output
 end

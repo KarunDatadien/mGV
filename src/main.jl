@@ -72,7 +72,7 @@ function process_year(year)
 
     println("Opening output file...")
     output_file = joinpath(output_dir, "$(output_file_prefix)$(year).nc")
-    @time out_ds, prec_scaled, water_storage_output, Q12_output, tair_output, tsurf_output, canopy_evaporation_output, transpiration_output = create_output_netcdf(output_file, prec_cpu, LAI_cpu)
+    @time out_ds, prec_scaled, water_storage_output, Q12_output, tair_output, tsurf_output, canopy_evaporation_output, transpiration_output, aerodynamic_resistance_output = create_output_netcdf(output_file, prec_cpu, LAI_cpu)
 
     println("Running...") 
     num_days = size(prec_cpu, 3)
@@ -179,19 +179,19 @@ function process_year(year)
                 kappa_array,         # Thermal conductivity (CuArray)
                 0.1,             # D1 (layer 1 depth in meters)
                 0.4,             # D2 (layer 2 depth in meters)
-                3600,            # delta_t (time step in seconds)
+                1,               # delta_t (time step in days)
                 elev_gpu,          # Elevation (CuArray)
                 vp_gpu,            # Vapor pressure (CuArray)
                 Cs_array,
                 E_n
             )
 
-            
             # Write results to the NetCDF file from the GPU
             #water_storage_summed_output[:, :, day] = Array(sum(water_storage; dims=4)[:, :, :, 1])
             println("tsurf size: ", size(tsurf))
             println("tair size: ", size(tair_gpu))
 
+            aerodynamic_resistance_output[:, :, day, :] = Array(aerodynamic_resistance)
             canopy_evaporation_output[:, :, day, :] = Array(canopy_evaporation)
             transpiration_output[:, :, day, :] = Array(transpiration)
             tair_output[:, :, day] = Array(tair_gpu)
