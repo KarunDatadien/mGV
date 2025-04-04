@@ -179,7 +179,7 @@ function process_year(year)
                 kappa_array,         # Thermal conductivity (CuArray)
                 0.1,             # D1 (layer 1 depth in meters)
                 0.4,             # D2 (layer 2 depth in meters)
-                1,               # delta_t (time step in days)
+                day_sec,               # delta_t (time step in seconds -> 1 day in s)
                 elev_gpu,          # Elevation (CuArray)
                 vp_gpu,            # Vapor pressure (CuArray)
                 Cs_array,

@@ -17,17 +17,14 @@ function solve_surface_temperature(
     println("rh has NaN: ", any(isnan, rh), " min/max: ", minimum(rh), " / ", maximum(rh))
 
     # === Compute dependent quantities ===
-    scale_height = calculate_scale_height(Ta, elev_gpu)
-    surface_pressure = p_std .* exp.(-elev_gpu ./ scale_height)
     latent_heat = calculate_latent_heat(Ta) # should be with dimension W*m^-2
-    rho_a = 0.003486 .* surface_pressure ./ (275 .+ Ta)
+    rho_a = 1.225 # Density of air (TODO: make temperature dependent?)
 
-    println("rho_a min/max: ", minimum(rho_a), " / ", maximum(rho_a))
     println("latent_heat min/max: ", minimum(latent_heat), " / ", maximum(latent_heat))
 
     # === Constants ===
     top_layer_depth = 0.3
-    rho_w = 1000.0  # Density of liquid water
+    rho_w = 1000.0  # Density of liquid water (TODO: make temperature dependent?)
 
     # === Precompute constants ===
     base_term = (kappa ./ D2) .+ (Cs .* D2 ./ (2 * delta_t))
@@ -44,7 +41,7 @@ function solve_surface_temperature(
     function f(Ts_new, Ts_old)
         lhs = emissivity .* sigma .* Ts_new.^4 .+ common_term .* Ts_new
         rhs = (1 .- albedo) .* Rs .+ emissivity .* RL .+
-              (rho_a .* c_p_air ./ rh) .* Ta .- rho_w .* lat_vap .* E_n .+ # TODO: check if I'm using the correct lat_vap
+              (rho_a .* c_p_air ./ rh) .* Ta .- rho_w .* lat_vap .* (E_n .* mm_to_m .* rho_w ./ day_sec) .+ 
               (rho_a .* c_p_air .* top_layer_depth .* Ts_old ./ (2 * delta_t)) .+
               ((kappa .* T2 ./ D2) .+ (Cs .* D2 .* T1 ./ (2 * delta_t))) ./ 
               (1 .+ (D1 / D2) .+ (Cs .* D1 .* D2 ./ (2 * delta_t .* kappa)))
