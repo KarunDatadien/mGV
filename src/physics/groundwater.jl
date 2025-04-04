@@ -1,4 +1,4 @@
-function soil_conductivity(moist, ice_frac, soil_dens_min, bulk_dens_min, quartz, soil_density, bulk_density, organic_frac, porosity)
+function soil_conductivity(moist, ice_frac, soil_dens_min, bulk_dens_min, quartz, organic_frac, porosity)
 
     # Unfrozen water content
     Wu = moist .- ice_frac
@@ -10,11 +10,9 @@ function soil_conductivity(moist, ice_frac, soil_dens_min, bulk_dens_min, quartz
     println("soil_dens_min: ", minimum(soil_dens_min), " / ", maximum(soil_dens_min))
     println("bulk_dens_min: ", minimum(bulk_dens_min), " / ", maximum(bulk_dens_min))
 
-
     println("Kdry_min: ", minimum(Kdry_min), " / ", maximum(Kdry_min))
     println("Kdry_org: ", minimum(Kdry_org), " / ", maximum(Kdry_org))
     println("Kdry: ", minimum(Kdry), " / ", maximum(Kdry))
-
 
     # Fractional degree of saturation
     Sr = ifelse.(porosity .> 0, moist ./ porosity, 0.0)

@@ -158,11 +158,11 @@ function process_year(year)
     
             ice_frac = 0
 
-            ## Placeholders:
+            ## TODO: fix placeholders:
             soil_temp1_gpu = copy(tair_gpu)
-            soil_temp2_gpu = copy(tair_gpu)            
+            soil_temp2_gpu = copy(tair_gpu)
     
-            kappa_array = soil_conductivity(soil_moisture_new, ice_frac, soil_dens_min, bulk_dens_min, quartz_gpu, soil_dens_gpu, bulk_dens_gpu, organic_frac, porosity)
+            kappa_array = soil_conductivity(soil_moisture_new, ice_frac, soil_dens_min, bulk_dens_min, quartz_gpu, organic_frac, porosity)
             println("kappa_array has NaN: ", any(isnan, kappa_array), " min/max: ", minimum(kappa_array), " / ", maximum(kappa_array))
 
             
@@ -177,8 +177,8 @@ function process_year(year)
                 lwdown_gpu,   # RL: longwave radiation (Float32)
                 aerodynamic_resistance, # Aerodynamic resistance (CuArray)
                 kappa_array,         # Thermal conductivity (CuArray)
-                0.1,             # D1 (layer 1 depth in meters)
-                0.4,             # D2 (layer 2 depth in meters)
+                0.1,             # D1 (layer 1 depth in meters) TODO: get from input file?
+                0.4,             # D2 (layer 2 depth in meters) TODO: get from input file?
                 day_sec,               # delta_t (time step in seconds -> 1 day in s)
                 elev_gpu,          # Elevation (CuArray)
                 vp_gpu,            # Vapor pressure (CuArray)
