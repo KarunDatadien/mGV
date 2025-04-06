@@ -79,6 +79,10 @@ function process_year(year)
     day_prev = 0
     month_prev = 0
 
+    # For the first timestep we set tsurf = tair (see page 14,421 of Liang et al. (1994)):
+    tsurf = tair_gpu  # TODO: make tsurf global such that it's carried over to next year
+    
+    # Start year long loop with daily timestep
     @showprogress "Processing year $year (GPU)..." for day in 1:num_days
         month = day_to_month(day, year)
         
@@ -90,9 +94,6 @@ function process_year(year)
             gpu_load_daily_inputs(day, day_prev, 
                                   [prec_cpu, tair_cpu, wind_cpu, vp_cpu, swdown_cpu, lwdown_cpu], 
                                   [prec_gpu, tair_gpu, wind_gpu, vp_gpu, swdown_gpu, lwdown_gpu])
-
-            # Start computations for potential evaporation
-            tsurf = tair_gpu  # TODO: calculate actual tsurf
 
             aerodynamic_resistance = compute_aerodynamic_resistance(
                 z2, d0_gpu, z0_gpu, K, tsurf, tair_gpu, wind_gpu
@@ -110,8 +111,8 @@ function process_year(year)
 
             potential_evaporation = calculate_potential_evaporation(
                 tair_gpu, vp_gpu, elev_gpu, net_radiation, 
-                aerodynamic_resistance, canopy_resistance, rarc_gpu
-            ) # Penmann-Monteith equation, to check more precisely
+                aerodynamic_resistance, rarc_gpu
+            ) # Penmann-Monteith equation, to check more precisely, because I think canopy resistance should be set to 0? Removed. To check if correct.
 
             max_water_storage = calculate_max_water_storage(LAI_gpu) # Eq. (2), checked
 
@@ -180,8 +181,6 @@ function process_year(year)
                 0.1,             # D1 (layer 1 depth in meters) TODO: get from input file?
                 0.4,             # D2 (layer 2 depth in meters) TODO: get from input file?
                 day_sec,               # delta_t (time step in seconds -> 1 day in s)
-                elev_gpu,          # Elevation (CuArray)
-                vp_gpu,            # Vapor pressure (CuArray)
                 Cs_array,
                 E_n
             )

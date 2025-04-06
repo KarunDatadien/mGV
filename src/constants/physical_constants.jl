@@ -2,12 +2,12 @@ module PhysicalConstants
     export svp_a, svp_b, svp_c, pa_per_kpa, 
            k_b, n_a, r_gas, mw_air, r_air, 
            t_freeze, lapse_rate, lat_vap, g, sigma, 
-           p_std, c_p_air, day_sec
+           p_std, c_p_air, day_sec, mm_in_m
 
     # Saturation Vapor Pressure Constants
-    const svp_a = 0.61078
-    const svp_b = 17.269
-    const svp_c = 237.3
+    const svp_a = 0.61078 # Empirical coefficient; gives SVP at 0 °C (kPa)
+    const svp_b = 17.269 # Dimensionless empirical constant
+    const svp_c = 237.3 # Dimensionally same as temperature (used with T in °C)
     const pa_per_kpa = 1000
 
     # Universal Physical Constants
@@ -19,7 +19,7 @@ module PhysicalConstants
 
     # Temperature and Environmental Constants
     const t_freeze = 273.15   # Freezing temperature (K)
-    const lapse_rate = -0.0065  # Lapse rate (K/m)
+    const lapse_rate = 0.0065  # Lapse rate (K/m)
 
     # Energy and Radiation Constants
     const lat_vap = 2.501e6   # Latent heat of vaporization (J/kg)
@@ -32,5 +32,5 @@ module PhysicalConstants
 
     # Unit Conversion Constants
     const day_sec = 86400     # Seconds in a day
-    const mm_to_m = 1e-3      # Convertion factor from mm to m
+    const mm_in_m = 1e3       # Conversion factor from mm to m
 end
