@@ -130,21 +130,17 @@ function calculate_transpiration(
     println("root_gpu shape: ", size(root_gpu))
 
     # Compute stress factor
-    gsm_inv = calculate_gsm_inv(soil_moisture_old, soil_moisture_critical, wilting_point)
-    println("gsm_inv shape: ", size(gsm_inv))
+    #gsm_inv = calculate_gsm_inv(soil_moisture_old, soil_moisture_critical, wilting_point)
+    #println("gsm_inv shape: ", size(gsm_inv))
 
     # Expand for broadcasting
    # gsm_inv_exp = reshape(gsm_inv, size(gsm_inv,1), size(gsm_inv,2), size(gsm_inv,3), 1)
-    println("g_sm_exp shape: ", size(g_sm_exp))
+    #println("g_sm_exp shape: ", size(g_sm_exp))
 
-    canopy_resistance = compute_partial_canopy_resistance(rmin_gpu, LAI_gpu) ./ gsm_inv # Eq. (6), TODO: check
+    canopy_resistance = compute_partial_canopy_resistance(rmin_gpu, LAI_gpu) # ./ gsm_inv # Eq. (6), TODO: add the gsm_inv multiplication
 
-    #canopy_resistance_exp = reshape(canopy_resistance, size(canopy_resistance,1), size(canopy_resistance,2), 1, size(canopy_resistance,4))
-    #println("canopy_resistance_exp shape: ", size(canopy_resistance_exp))
-#
     ## Calculate modifier factor
-    #factor = (1.0 .- (water_storage ./ max_water_storage) .^ (2/3)) .* potential_evaporation
-    #println("factor shape: ", size(factor))
+    transpiration = (1.0 .- (water_storage ./ max_water_storage) .^ (2/3)) .* potential_evaporation .* (aerodynamic_resistance ./ (aerodynamic_resistance .+ rarc_gpu .+ canopy_resistance))
 #
     ## Compute layer-wise transpiration
     #E_layer = factor .* (aerodynamic_resistance ./ (aerodynamic_resistance .+ rarc_gpu .+ canopy_resistance_exp ./ g_sm_exp))
@@ -154,5 +150,29 @@ function calculate_transpiration(
     #E_t = sum(root_gpu .* E_layer, dims=3)
     #println("E_t shape (final transpiration): ", size(E_t))
 
-    return E_t
+    return transpiration
+end
+
+
+function calculate_soil_evaporation(soil_moisture_new, soil_moisture_max, potential_evaporation)
+    # Compute the saturated area fraction
+    A_sat = 1.0 .- (1.0 .- soil_moisture_new ./ soil_moisture_max).^b_i
+    
+    # Compute the unsaturated area fraction
+    x = 1.0 .- A_sat
+
+    # Approximate the series expansion from eq. (15) using the first four terms
+    S_series = 1.0 .+
+               (b_i ./ (1.0 .+ b_i)) .* x.^(1.0 ./ b_i) .+
+               (b_i ./ (2.0 .+ b_i)) .* x.^(2.0 ./ b_i) .+
+               (b_i ./ (3.0 .+ b_i)) .* x.^(3.0 ./ b_i)
+    
+    # This factor adjusts the unsaturated evaporation contribution
+    Ev_unsat = potential_evaporation .* i0_over_im .* x .* S_series # TODO: calculate the i0_over_im
+    
+    # Evaporation from the saturated fraction occurs at the full potential rate
+    Ev_sat = potential_evaporation .* A_sat
+
+    # Total soil evaporation is the sum of saturated and unsaturated contributions
+    return Ev_sat .+ Ev_unsat
 end

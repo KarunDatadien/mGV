@@ -1,5 +1,5 @@
 module SimConstants
-    export N_veg, K_L, K, z2, Ri_cr, emissivity, 
+    export N_veg, K_L, K, z2, Ri_cr, emissivity, b_i
            Ki, Kw, Kdry_org, Ks_org, 
            organic_frac, bulk_dens_org, soil_dens_org
 
@@ -9,6 +9,7 @@ module SimConstants
     const z2 = 10
     const Ri_cr = 0.2
     const emissivity = 0.97 
+    const b_i = 0.008 # As taken from Liang et al. (1994) by calibration
 
     # Thermal conductivity constants
     const Ki       = 2.2   # Thermal conductivity of ice (W/mK)

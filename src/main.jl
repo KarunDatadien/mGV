@@ -100,7 +100,7 @@ function process_year(year)
 
             aerodynamic_resistance = compute_aerodynamic_resistance(
                 z2, d0_gpu, z0_gpu, K, tsurf, tair_gpu, wind_gpu
-            ) # Eq. (3). TODO: check once solve_surface_temperature function has been checked
+            ) # Eq. (3). 🚧 TODO: check once solve_surface_temperature function has been checked
 
             net_radiation = calculate_net_radiation(
                 swdown_gpu, lwdown_gpu, albedo_gpu, tsurf
@@ -123,14 +123,15 @@ function process_year(year)
                 potential_evaporation, aerodynamic_resistance, rarc_gpu, 
                 water_storage, max_water_storage, soil_moisture_old, soil_moisture_critical, wilting_point, 
                 root_gpu
-            ) # Eq. (11)
+            ) # Eq. (5), 🚧 TODO: add the gsm_inv multiplication
             
-            # === Update Water Storage ===
-            throughfall .= 0
-            water_storage .+= (prec_gpu .- canopy_evaporation) # here prec_gpu and canopy evap have different shapes
-            water_storage .= clamp.(water_storage, 0, max_water_storage)
-            throughfall = max.(0, water_storage .- max_water_storage)             # Compute throughfall
-        
+            # === Update Water Storage with Throughfall Computation; Eq. 16 ===
+            new_water_storage = water_storage .+ (prec_gpu .- canopy_evaporation)
+            throughfall = max.(0, new_water_storage .- max_water_storage)
+            water_storage = clamp.(new_water_storage, 0, max_water_storage)
+
+            soil_evaporation = calculate_soil_evaporation(soil_moisture_new, soil_moisture_max, potential_evaporation)
+
             ## Drainage from layer 1 to 2; Q12
             Q12 = ksat_gpu[:, :, 1] .* ((soil_moisture_old[:, :, 1] .- residmoist_gpu[:, :, 1]) ./ (soil_moisture_max[:, :, 1] .- residmoist_gpu[:, :, 1])) .^ expt_gpu[:, :, 1]
 
@@ -149,7 +150,7 @@ function process_year(year)
             println("canopy_evaporation: ", size(canopy_evaporation))
             println("transpiration: ", size(transpiration))
 
-            E_n = canopy_evaporation + transpiration
+            E_n = canopy_evaporation + transpiration # + soil_evaporation
     
             ice_frac = 0
 
@@ -220,9 +221,7 @@ function process_year(year)
 
             println("aerodynamic_resistance: ", size(aerodynamic_resistance))
             
-
             aerodynamic_resistance_output[:, :, day, :] = Array(aerodynamic_resistance)
-
 
             # Replace extreme values with NaN to avoid overflow issues and allow proper summing
             canopy_evaporation .= ifelse.(
@@ -245,6 +244,7 @@ function process_year(year)
 
 
             transpiration_output[:, :, day, :] = Array(transpiration)
+
             tair_output[:, :, day] = Array(tair_gpu)
           #  tsurf_output[:, :, day, :, :] = Array(tsurf)
             water_storage_output[:, :, day, :] = Array(water_storage)
