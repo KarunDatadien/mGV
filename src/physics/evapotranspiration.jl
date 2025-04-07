@@ -154,7 +154,7 @@ function calculate_transpiration(
 end
 
 
-function calculate_soil_evaporation(soil_moisture_new, soil_moisture_max, potential_evaporation)
+function calculate_soil_evaporation(soil_moisture_new, soil_moisture_max, potential_evaporation, b_i)
     # Compute the saturated area fraction
     A_sat = 1.0 .- (1.0 .- soil_moisture_new ./ soil_moisture_max).^b_i
     
@@ -167,8 +167,11 @@ function calculate_soil_evaporation(soil_moisture_new, soil_moisture_max, potent
                (b_i ./ (2.0 .+ b_i)) .* x.^(2.0 ./ b_i) .+
                (b_i ./ (3.0 .+ b_i)) .* x.^(3.0 ./ b_i)
     
+    i_m = (1.0 .+ b_i).*soil_moisture_max # Max infiltration, Eq. 17 rewritten
+    i_0 = i_m .* (1.0 .- (1.0 .- A_sat).^(1.0 ./ b_i)) # Eq. 13, TODO: check if correct, this is how it's done in VIC-WUR
+
     # This factor adjusts the unsaturated evaporation contribution
-    Ev_unsat = potential_evaporation .* i0_over_im .* x .* S_series # TODO: calculate the i0_over_im
+    Ev_unsat = potential_evaporation .* i_0 ./ i_m .* x .* S_series
     
     # Evaporation from the saturated fraction occurs at the full potential rate
     Ev_sat = potential_evaporation .* A_sat

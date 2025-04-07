@@ -22,6 +22,7 @@ println("Loading parameter data and allocating memory...")
     (soil_dens_cpu,  soil_dens_gpu)  = read_and_allocate_parameter(soil_dens_var)
     (expt_cpu,       expt_gpu)       = read_and_allocate_parameter(expt_var)
     (coverage_cpu,   coverage_gpu)   = read_and_allocate_parameter(coverage_var)
+    (b_infilt_cpu,   b_infilt_gpu)   = read_and_allocate_parameter(b_infilt_var)   
 end
 
 # === Initial States ===
@@ -36,10 +37,10 @@ global soil_moisture_max = CUDA.zeros(Float32, size(soil_dens_gpu))
 
 gpu_load_static_inputs([rmin_cpu, rarc_cpu, elev_cpu, ksat_cpu, residmoist_cpu, init_moist_cpu, root_cpu,
                         Wcr_cpu, Wfc_cpu, Wpwp_cpu, depth_cpu, quartz_cpu,
-                        bulk_dens_cpu, soil_dens_cpu, expt_cpu],
+                        bulk_dens_cpu, soil_dens_cpu, expt_cpu, b_infilt_cpu],
                        [rmin_gpu, rarc_gpu, elev_gpu, ksat_gpu, residmoist_gpu, init_moist_gpu, root_gpu,
                         Wcr_gpu, Wfc_gpu, Wpwp_gpu, depth_gpu, quartz_gpu,
-                        bulk_dens_gpu, soil_dens_gpu, expt_gpu])
+                        bulk_dens_gpu, soil_dens_gpu, expt_gpu, b_infilt_gpu])
 
 reshape_static_inputs!()
 
@@ -130,7 +131,7 @@ function process_year(year)
             throughfall = max.(0, new_water_storage .- max_water_storage)
             water_storage = clamp.(new_water_storage, 0, max_water_storage)
 
-            soil_evaporation = calculate_soil_evaporation(soil_moisture_new, soil_moisture_max, potential_evaporation)
+            soil_evaporation = calculate_soil_evaporation(soil_moisture_new, soil_moisture_max, potential_evaporation, b_infilt_gpu)
 
             ## Drainage from layer 1 to 2; Q12
             Q12 = ksat_gpu[:, :, 1] .* ((soil_moisture_old[:, :, 1] .- residmoist_gpu[:, :, 1]) ./ (soil_moisture_max[:, :, 1] .- residmoist_gpu[:, :, 1])) .^ expt_gpu[:, :, 1]
@@ -241,7 +242,7 @@ function process_year(year)
             summed_on_gpu4 = ifelse.(sum(x -> isnan(x) ? 0 : 1, canopy_evaporation, dims=4) .== 0, NaN, summed_on_gpu4) # TODO: pre-allocate this?
 
             canopy_evaporation_summed_output[:, :, day] = Array(summed_on_gpu4)
-
+b_infilt
 
             transpiration_output[:, :, day, :] = Array(transpiration)
 
