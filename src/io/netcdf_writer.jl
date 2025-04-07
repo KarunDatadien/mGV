@@ -24,13 +24,31 @@ function create_output_netcdf(output_file::String, reference_array, reference_ar
 
     canopy_evaporation_output = defVar(out_ds, "canopy_evaporation_output", Float32, ("lon", "lat", "time", "nveg"))
 
+    canopy_evaporation_summed_output = defVar(out_ds, "canopy_evaporation_summed_output", Float32, ("lon", "lat", "time"))
+
     transpiration_output = defVar(out_ds, "transpiration_output", Float32, ("lon", "lat", "time", "nveg"))
 
     aerodynamic_resistance_output = defVar(out_ds, "aerodynamic_resistance_output", Float32, ("lon", "lat", "time", "nveg"))
+
+    potential_evaporation_output = defVar(out_ds, "potential_evaporation_output", Float32, ("lon", "lat", "time", "nveg"))
+
+    potential_evaporation_summed_output = defVar(out_ds, "potential_evaporation_summed_output", Float32, ("lon", "lat", "time"))
+
+    net_radiation_output = defVar(out_ds, "net_radiation_output", Float32, ("lon", "lat", "time", "nveg"))
+
+    net_radiation_summed_output = defVar(out_ds, "net_radiation_summed_output", Float32, ("lon", "lat", "time"))
+
+    max_water_storage_output = defVar(out_ds, "max_water_storage_output", Float32, ("lon", "lat", "time", "nveg"))
+
+    max_water_storage_summed_output = defVar(out_ds, "max_water_storage_summed_output", Float32, ("lon", "lat", "time"))
+    max_water_storage_summed_output.attrib["units"] = "mm"
+    max_water_storage_summed_output.attrib["description"] = "The maximum amount of water intercepted by the canopy"
 
     # Set attributes                     
     pr_scaled.attrib["units"]       = "mm/day"
     pr_scaled.attrib["description"] = "Daily precipitation scaled with GPU computations (optimized)"
 
-    return out_ds, pr_scaled, water_storage_output, Q12_output, tair_output, tsurf_output, canopy_evaporation_output, transpiration_output, aerodynamic_resistance_output
+    return out_ds, pr_scaled, water_storage_output, Q12_output, tair_output, tsurf_output, canopy_evaporation_output, canopy_evaporation_summed_output,
+    transpiration_output, aerodynamic_resistance_output, potential_evaporation_output, potential_evaporation_summed_output, 
+    net_radiation_output, net_radiation_summed_output, max_water_storage_output, max_water_storage_summed_output
 end

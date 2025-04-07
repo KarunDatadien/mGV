@@ -72,7 +72,10 @@ function process_year(year)
 
     println("Opening output file...")
     output_file = joinpath(output_dir, "$(output_file_prefix)$(year).nc")
-    @time out_ds, prec_scaled, water_storage_output, Q12_output, tair_output, tsurf_output, canopy_evaporation_output, transpiration_output, aerodynamic_resistance_output = create_output_netcdf(output_file, prec_cpu, LAI_cpu)
+    @time out_ds, prec_scaled, water_storage_output, Q12_output, tair_output, tsurf_output, 
+    canopy_evaporation_output, canopy_evaporation_summed_output, transpiration_output, aerodynamic_resistance_output, 
+    potential_evaporation_output, potential_evaporation_summed_output, net_radiation_output, 
+    net_radiation_summed_output, max_water_storage_output, max_water_storage_summed_output = create_output_netcdf(output_file, prec_cpu, LAI_cpu)
 
     println("Running...") 
     num_days = size(prec_cpu, 3)
@@ -97,49 +100,40 @@ function process_year(year)
 
             aerodynamic_resistance = compute_aerodynamic_resistance(
                 z2, d0_gpu, z0_gpu, K, tsurf, tair_gpu, wind_gpu
-            ) # Eq. (3) to check
-
-            canopy_resistance = compute_canopy_resistance(rmin_gpu, LAI_gpu) # Eq. (6), to check
+            ) # Eq. (3). TODO: check once solve_surface_temperature function has been checked
 
             net_radiation = calculate_net_radiation(
                 swdown_gpu, lwdown_gpu, albedo_gpu, tsurf
-            )
-
-            #println("aerodynamic_resistance SIZE:", size(aerodynamic_resistance)) 
-            #println("canopy_resistance SIZE:", size(canopy_resistance))
-            #println("rarc_gpu SIZE:", size(rarc_gpu)) 
+            ) # [W/m^2], works ✅
 
             potential_evaporation = calculate_potential_evaporation(
                 tair_gpu, vp_gpu, elev_gpu, net_radiation, 
                 aerodynamic_resistance, rarc_gpu
-            ) # Penmann-Monteith equation, to check more precisely, because I think canopy resistance should be set to 0? Removed. To check if correct.
+            ) # Penmann-Monteith equation with canopy resistance set to 0 , output in [mm/day], works ✅
 
-            max_water_storage = calculate_max_water_storage(LAI_gpu) # Eq. (2), checked
+            max_water_storage = calculate_max_water_storage(LAI_gpu) # Eq. (2), works ✅
 
             canopy_evaporation = calculate_canopy_evaporation(
-                water_storage, max_water_storage, LAI_gpu, potential_evaporation, aerodynamic_resistance, rarc_gpu, prec_gpu
-            ) #Eq. (1), (9) and (10), to check: Eq. (10)
+                water_storage, max_water_storage, potential_evaporation, aerodynamic_resistance, rarc_gpu, prec_gpu
+            ) # Eq. (1), (9) and (10), works ✅
 
             soil_moisture_old = soil_moisture_new
 
             transpiration = calculate_transpiration(
-                potential_evaporation, aerodynamic_resistance, rarc_gpu, canopy_resistance, 
+                potential_evaporation, aerodynamic_resistance, rarc_gpu, 
                 water_storage, max_water_storage, soil_moisture_old, soil_moisture_critical, wilting_point, 
                 root_gpu
-            )
+            ) # Eq. (11)
             
             # === Update Water Storage ===
             throughfall .= 0
-            water_storage .+= (prec_gpu .- canopy_evaporation)
+            water_storage .+= (prec_gpu .- canopy_evaporation) # here prec_gpu and canopy evap have different shapes
             water_storage .= clamp.(water_storage, 0, max_water_storage)
             throughfall = max.(0, water_storage .- max_water_storage)             # Compute throughfall
         
             ## Drainage from layer 1 to 2; Q12
             Q12 = ksat_gpu[:, :, 1] .* ((soil_moisture_old[:, :, 1] .- residmoist_gpu[:, :, 1]) ./ (soil_moisture_max[:, :, 1] .- residmoist_gpu[:, :, 1])) .^ expt_gpu[:, :, 1]
 
-            ## Calculate intermediate values
-            #precipitation_term = current_precipitation * time_step_placeholder
-    
             ## Water balance layer 1 and direct surface runoff
             #Q_surface = gw.calculate_Q_surface(current_precipitation, time_step_placeholder, soil_moisture_max[0,:,:], soil_moisture_old[0,:,:], i_0, max_infil)
     
@@ -169,35 +163,115 @@ function process_year(year)
             
             Cs_array = volumetric_heat_capacity(bulk_dens_gpu ./ soil_dens_gpu, soil_moisture_new, ice_frac, organic_frac)
 
-            tsurf = solve_surface_temperature(
-                tair_gpu,          # Air temperature (CuArray)
-                soil_temp1_gpu,    # Soil layer 1 temperature (CuArray)
-                soil_temp2_gpu,    # Soil layer 2 temperature (CuArray)
-                albedo_gpu,        # Surface albedo (CuArray)
-                swdown_gpu,   # Rs: shortwave radiation (Float32)
-                lwdown_gpu,   # RL: longwave radiation (Float32)
-                aerodynamic_resistance, # Aerodynamic resistance (CuArray)
-                kappa_array,         # Thermal conductivity (CuArray)
-                0.1,             # D1 (layer 1 depth in meters) TODO: get from input file?
-                0.4,             # D2 (layer 2 depth in meters) TODO: get from input file?
-                day_sec,               # delta_t (time step in seconds -> 1 day in s)
-                Cs_array,
-                E_n
-            )
+    #        tsurf = solve_surface_temperature(
+    #            tair_gpu,          # Air temperature (CuArray)
+    #            soil_temp1_gpu,    # Soil layer 1 temperature (CuArray)
+    #            soil_temp2_gpu,    # Soil layer 2 temperature (CuArray)
+    #            albedo_gpu,        # Surface albedo (CuArray)
+    #            swdown_gpu,   # Rs: shortwave radiation (Float32)
+    #            lwdown_gpu,   # RL: longwave radiation (Float32)
+    #            aerodynamic_resistance, # Aerodynamic resistance (CuArray)
+    #            kappa_array,         # Thermal conductivity (CuArray)
+    #            0.1,             # D1 (layer 1 depth in meters) TODO: get from input file?
+    #            0.4,             # D2 (layer 2 depth in meters) TODO: get from input file?
+    #            day_sec,               # delta_t (time step in seconds -> 1 day in s)
+    #            Cs_array,
+    #            E_n
+    #        ) # TODO: issue: somehow changes canopy_evaporation and others from shape: (204, 180, 1, 22) to (204, 180, 3, 22)
 
             # Write results to the NetCDF file from the GPU
             #water_storage_summed_output[:, :, day] = Array(sum(water_storage; dims=4)[:, :, :, 1])
             println("tsurf size: ", size(tsurf))
             println("tair size: ", size(tair_gpu))
 
+            potential_evaporation_output[:, :, day, :] = Array(potential_evaporation)
+
+            # Sum while skipping NaN
+            summed_on_gpu = dropdims(
+                sum(x -> isnan(x) ? 0.0 : x, potential_evaporation, dims=4) .* 
+                (sum(x -> isnan(x) ? 0 : 1, potential_evaporation, dims=4) .> 0), 
+                dims=4)
+            # Replace all-NaN sums with NaN
+            summed_on_gpu = ifelse.(sum(x -> isnan(x) ? 0 : 1, potential_evaporation, dims=4) .== 0, NaN, summed_on_gpu) # TODO: pre-allocate this?
+
+            # Transfer to CPU and assign
+            potential_evaporation_summed_output[:, :, day] = Array(summed_on_gpu)
+
+            println("net_radiation: ", size(net_radiation))
+
+            # Replace extreme values with NaN to avoid overflow issues and allow proper summing
+            net_radiation .= ifelse.(
+                abs.(net_radiation) .> 1e25,  # or 1e30 if you want stricter
+                NaN,
+                net_radiation
+            )
+                        
+            net_radiation_output[:, :, day, :] = Array(net_radiation)
+
+            # Sum while skipping NaN
+            summed_on_gpu2 = dropdims(
+                sum(x -> isnan(x) ? 0.0 : x, net_radiation, dims=4) .* 
+                (sum(x -> isnan(x) ? 0 : 1, net_radiation, dims=4) .> 0), 
+                dims=4)
+            # Replace all-NaN sums with NaN
+            summed_on_gpu2 = ifelse.(sum(x -> isnan(x) ? 0 : 1, net_radiation, dims=4) .== 0, NaN, summed_on_gpu2) # TODO: pre-allocate this?
+
+            net_radiation_summed_output[:, :, day] = Array(summed_on_gpu2)
+
+            println("aerodynamic_resistance: ", size(aerodynamic_resistance))
+            
+
             aerodynamic_resistance_output[:, :, day, :] = Array(aerodynamic_resistance)
+
+
+            # Replace extreme values with NaN to avoid overflow issues and allow proper summing
+            canopy_evaporation .= ifelse.(
+                abs.(canopy_evaporation) .> 1e25,  # or 1e30 if you want stricter
+                NaN,
+                canopy_evaporation
+            )
+
             canopy_evaporation_output[:, :, day, :] = Array(canopy_evaporation)
+
+            # Sum while skipping NaN
+            summed_on_gpu4 = dropdims(
+                sum(x -> isnan(x) ? 0.0 : x, canopy_evaporation, dims=4) .* 
+                (sum(x -> isnan(x) ? 0 : 1, canopy_evaporation, dims=4) .> 0), 
+                dims=4)
+            # Replace all-NaN sums with NaN
+            summed_on_gpu4 = ifelse.(sum(x -> isnan(x) ? 0 : 1, canopy_evaporation, dims=4) .== 0, NaN, summed_on_gpu4) # TODO: pre-allocate this?
+
+            canopy_evaporation_summed_output[:, :, day] = Array(summed_on_gpu4)
+
+
             transpiration_output[:, :, day, :] = Array(transpiration)
             tair_output[:, :, day] = Array(tair_gpu)
-            tsurf_output[:, :, day, :, :] = Array(tsurf)
+          #  tsurf_output[:, :, day, :, :] = Array(tsurf)
             water_storage_output[:, :, day, :] = Array(water_storage)
             prec_scaled[:, :, day] = Array(prec_gpu)
             Q12_output[:, :, day] = Array(Q12)
+
+
+
+            # Replace extreme values with NaN to avoid overflow issues and allow proper summing
+            max_water_storage .= ifelse.(
+                abs.(max_water_storage) .> 1e25,  # or 1e30 if you want stricter
+                NaN,
+                max_water_storage
+            )
+
+            max_water_storage_output[:, :, day, :] = Array(max_water_storage)
+
+            # Sum while skipping NaN
+            summed_on_gpu3 = dropdims(
+                sum(x -> isnan(x) ? 0.0 : x, max_water_storage, dims=4) .* 
+                (sum(x -> isnan(x) ? 0 : 1, max_water_storage, dims=4) .> 0), 
+                dims=4)
+            # Replace all-NaN sums with NaN
+            summed_on_gpu3 = ifelse.(sum(x -> isnan(x) ? 0 : 1, max_water_storage, dims=4) .== 0, NaN, summed_on_gpu3) # TODO: pre-allocate this?
+            
+            max_water_storage_summed_output[:, :, day] = Array(summed_on_gpu3)
+
 
         end
         
