@@ -88,38 +88,4 @@ function calculate_gsm_inv(soil_moisture::CuArray, soil_moisture_critical::CuArr
     return gsm_inv
 end
 
-function calculate_transpiration(
-    potential_evaporation::CuArray, aerodynamic_resistance::CuArray, rarc_gpu::CuArray, canopy_resistance::CuArray, 
-    water_storage::CuArray, max_water_storage::CuArray, soil_moisture_old::CuArray, soil_moisture_critical::CuArray, 
-    wilting_point::CuArray, root_gpu::CuArray
-)
-    println("soil_moisture_old shape: ", size(soil_moisture_old))
-    println("soil_moisture_critical shape: ", size(soil_moisture_critical))
-    println("wilting_point shape: ", size(wilting_point))
-    println("root_gpu shape: ", size(root_gpu))
 
-    # Compute stress factor
-    g_sm = calculate_gsm_inv(soil_moisture_old, soil_moisture_critical, wilting_point)
-    println("g_sm shape: ", size(g_sm))
-
-    # Calculate modifier factor
-    factor = (1 .- (water_storage ./ max_water_storage) .^ (2/3)) .* potential_evaporation
-    println("factor shape: ", size(factor))
-
-    # Expand for broadcasting
-    g_sm_exp = reshape(g_sm, size(g_sm,1), size(g_sm,2), size(g_sm,3), 1)
-    println("g_sm_exp shape: ", size(g_sm_exp))
-
-    canopy_resistance_exp = reshape(canopy_resistance, size(canopy_resistance,1), size(canopy_resistance,2), 1, size(canopy_resistance,4))
-    println("canopy_resistance_exp shape: ", size(canopy_resistance_exp))
-
-    # Compute layer-wise transpiration
-    E_layer = factor .* (aerodynamic_resistance ./ (aerodynamic_resistance .+ rarc_gpu .+ canopy_resistance_exp ./ g_sm_exp))
-    println("E_layer shape: ", size(E_layer))
-
-    # Weighted sum with root fraction
-    E_t = sum(root_gpu .* E_layer, dims=3)
-    println("E_t shape (final transpiration): ", size(E_t))
-
-    return E_t
-end
