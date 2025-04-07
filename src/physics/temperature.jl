@@ -1,8 +1,7 @@
 function solve_surface_temperature(
     Ta::CuArray, T1::CuArray, T2::CuArray, albedo::CuArray,
     Rs::CuArray, RL::CuArray, rh::CuArray, kappa::CuArray,
-    D1, D2, delta_t, elev_gpu::CuArray,
-    vp_gpu::CuArray, Cs::CuArray, E_n::CuArray
+    D1, D2, delta_t, Cs::CuArray, E_n::CuArray
 )
     # === Constants (assumed globally defined in Main) ===
     @assert isdefined(Main, :lat_vap) "lat_vap is undefined"
@@ -41,7 +40,7 @@ function solve_surface_temperature(
     function f(Ts_new, Ts_old)
         lhs = emissivity .* sigma .* Ts_new.^4 .+ common_term .* Ts_new
         rhs = (1 .- albedo) .* Rs .+ emissivity .* RL .+
-              (rho_a .* c_p_air ./ rh) .* Ta .- rho_w .* lat_vap .* (E_n .* mm_to_m ./ day_sec) .+ # E_n: convert mm/day to m/s
+              (rho_a .* c_p_air ./ rh) .* Ta .- rho_w .* lat_vap .* (E_n ./ (day_sec .* mm_in_m)) .+ # E_n: convert mm/day to m/s
               (rho_a .* c_p_air .* top_layer_depth .* Ts_old ./ (2 * delta_t)) .+
               ((kappa .* T2 ./ D2) .+ (Cs .* D2 .* T1 ./ (2 * delta_t))) ./ 
               (1 .+ (D1 / D2) .+ (Cs .* D1 .* D2 ./ (2 * delta_t .* kappa)))
