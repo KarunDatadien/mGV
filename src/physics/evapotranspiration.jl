@@ -47,7 +47,7 @@ function compute_aerodynamic_resistance(z2, d0_gpu, z0_gpu, K, tsurf, tair_gpu, 
     return aerodynamic_resistance
 end
 
-function compute_canopy_resistance(rmin_gpu, LAI_gpu)
+function compute_partial_canopy_resistance(rmin_gpu, LAI_gpu)
     # Canopy resistance based on soil moisture (Eq. 6), without gsm multiplication; 
     # done in evapotranspiration calculation step   
 
@@ -56,31 +56,46 @@ function compute_canopy_resistance(rmin_gpu, LAI_gpu)
 end
 
 function calculate_net_radiation(swdown_gpu, lwdown_gpu, albedo_gpu, tsurf)
-    return (1 .- albedo_gpu) .* swdown_gpu .+ emissivity .* (lwdown_gpu .- sigma .* tsurf.^4)
+    return (1.0 .- albedo_gpu) .* swdown_gpu .+ emissivity .* (lwdown_gpu .- sigma .* (tsurf .+ 273.15).^4)
 end
 
-function calculate_potential_evaporation(tair_gpu, vp_gpu, elev_gpu, net_radiation, aerodynamic_resistance, rc, rarc_gpu)
+function calculate_potential_evaporation(tair_gpu, vp_gpu, elev_gpu, net_radiation, aerodynamic_resistance, rarc_gpu)
     # Compute intermediate variables
-    vpd = calculate_vpd(tair_gpu,vp_gpu)
-    slope = calculate_svp_slope(tair_gpu)
-    latent_heat = calculate_latent_heat(tair_gpu)
-    scale_height = calculate_scale_height(tair_gpu, elev_gpu)
+    vpd           = calculate_vpd(tair_gpu, vp_gpu) # [Pa]
+    println("vpd[50,10] = ", Array(vpd)[50, 10])
 
-    surface_pressure = p_std .* exp.(-elev_gpu ./ scale_height)
-    psychrometric_constant = 1628.6 .* surface_pressure ./ latent_heat
-    air_density = 0.003486 .* surface_pressure ./ (275 .+ tair_gpu)
-    
-    # Penman-Monteith equation (mm/day)
-    numerator = slope .* net_radiation .+ (air_density .* c_p_air .* vpd ./ aerodynamic_resistance)
-    denominator = latent_heat .* (slope .+ psychrometric_constant .* (1 .+ (rc .+ rarc_gpu) ./ aerodynamic_resistance))
+    slope         = calculate_svp_slope(tair_gpu) # [Pa/°C]
+    println("slope[50,10] = ", Array(slope)[50, 10])
 
-    potential_evaporation = numerator ./ denominator .* day_sec
+    latent_heat   = calculate_latent_heat(tair_gpu) # [J/kg]
+    println("latent_heat[50,10] = ", Array(latent_heat)[50, 10])
+
+    scale_height  = calculate_scale_height(tair_gpu, elev_gpu) # [m] 
+    println("scale_height[50,10] = ", Array(scale_height)[50, 10])
+
+    surface_pressure = p_std .* exp.(-elev_gpu ./ scale_height) # [Pa]
+    println("surface_pressure[50,10] = ", Array(surface_pressure)[50, 10])
+
+    psychrometric_constant = 1628.6 .* surface_pressure ./ latent_heat # [Pa/K]
+    println("psychrometric_constant[50,10] = ", Array(psychrometric_constant)[50, 10])
+
+    air_density    = 0.003486 .* surface_pressure ./ (273.15 .+ tair_gpu) # [kg/m^3]
+    println("air_density[50,10] = ", Array(air_density)[50, 10])
+
+
+    # Penman-Monteith equation (mm/day) with canopy resistance set to zero
+    numerator = slope .* (net_radiation .* day_sec) .+ (air_density .* c_p_air .* vpd ./ aerodynamic_resistance)
+    denominator = latent_heat .* (slope .+ psychrometric_constant .* (1 .+ (rarc_gpu) ./ aerodynamic_resistance))
+    potential_evaporation = (numerator ./ denominator)  # kg/m^2/day = [mm/day]
 
     # Ensure evaporation is non-negative when vapor pressure deficit is positive
-    potential_evaporation = ifelse.((vpd .>= 0.0) .& (potential_evaporation .< 0.0), 0.0, potential_evaporation)
+    potential_evaporation = ifelse.((vpd .>= 0.0) .& (potential_evaporation .< 0.0),
+                                    0.0,
+                                    potential_evaporation)
     
-    return potential_evaporation
+    return potential_evaporation # [mm/day]
 end
+
 
 
 function calculate_max_water_storage(LAI_gpu)
@@ -88,7 +103,7 @@ function calculate_max_water_storage(LAI_gpu)
     return K_L .* LAI_gpu  
 end
 
-function calculate_canopy_evaporation(water_storage, max_water_storage, LAI_gpu, potential_evaporation, aerodynamic_resistance, rarc, prec_gpu)
+function calculate_canopy_evaporation(water_storage, max_water_storage, potential_evaporation, aerodynamic_resistance, rarc, prec_gpu)
 
     # Compute potential canopy evaporation
     canopy_evaporation_star = (water_storage ./ max_water_storage).^(2 / 3) .* potential_evaporation .* 
@@ -101,4 +116,43 @@ function calculate_canopy_evaporation(water_storage, max_water_storage, LAI_gpu,
     canopy_evaporation = f_n .* canopy_evaporation_star
 
     return canopy_evaporation
+end
+
+
+function calculate_transpiration(
+    potential_evaporation::CuArray, aerodynamic_resistance::CuArray, rarc_gpu::CuArray,  
+    water_storage::CuArray, max_water_storage::CuArray, soil_moisture_old::CuArray, soil_moisture_critical::CuArray, 
+    wilting_point::CuArray, root_gpu::CuArray
+)
+    println("soil_moisture_old shape: ", size(soil_moisture_old))
+    println("soil_moisture_critical shape: ", size(soil_moisture_critical))
+    println("wilting_point shape: ", size(wilting_point))
+    println("root_gpu shape: ", size(root_gpu))
+
+    # Compute stress factor
+    gsm_inv = calculate_gsm_inv(soil_moisture_old, soil_moisture_critical, wilting_point)
+    println("gsm_inv shape: ", size(gsm_inv))
+
+    # Expand for broadcasting
+   # gsm_inv_exp = reshape(gsm_inv, size(gsm_inv,1), size(gsm_inv,2), size(gsm_inv,3), 1)
+    println("g_sm_exp shape: ", size(g_sm_exp))
+
+    canopy_resistance = compute_partial_canopy_resistance(rmin_gpu, LAI_gpu) ./ gsm_inv # Eq. (6), TODO: check
+
+    #canopy_resistance_exp = reshape(canopy_resistance, size(canopy_resistance,1), size(canopy_resistance,2), 1, size(canopy_resistance,4))
+    #println("canopy_resistance_exp shape: ", size(canopy_resistance_exp))
+#
+    ## Calculate modifier factor
+    #factor = (1.0 .- (water_storage ./ max_water_storage) .^ (2/3)) .* potential_evaporation
+    #println("factor shape: ", size(factor))
+#
+    ## Compute layer-wise transpiration
+    #E_layer = factor .* (aerodynamic_resistance ./ (aerodynamic_resistance .+ rarc_gpu .+ canopy_resistance_exp ./ g_sm_exp))
+    #println("E_layer shape: ", size(E_layer))
+#
+    ## Weighted sum with root fraction
+    #E_t = sum(root_gpu .* E_layer, dims=3)
+    #println("E_t shape (final transpiration): ", size(E_t))
+
+    return E_t
 end
