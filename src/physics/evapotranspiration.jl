@@ -154,9 +154,9 @@ function calculate_transpiration(
 end
 
 
-function calculate_soil_evaporation(soil_moisture_new, soil_moisture_max, potential_evaporation, b_i)
+function calculate_soil_evaporation(soil_moisture, soil_moisture_max, potential_evaporation, b_i)
     # Compute the saturated area fraction
-    A_sat = 1.0 .- (1.0 .- soil_moisture_new ./ soil_moisture_max).^b_i
+    A_sat = 1.0 .- (1.0 .- soil_moisture ./ soil_moisture_max).^b_i
     
     # Compute the unsaturated area fraction
     x = 1.0 .- A_sat
@@ -171,10 +171,10 @@ function calculate_soil_evaporation(soil_moisture_new, soil_moisture_max, potent
     i_0 = i_m .* (1.0 .- (1.0 .- A_sat).^(1.0 ./ b_i)) # Eq. 13, TODO: check if correct, this is how it's done in VIC-WUR
 
     # This factor adjusts the unsaturated evaporation contribution
-    Ev_unsat = potential_evaporation .* i_0 ./ i_m .* x .* S_series
+    Ev_unsat = potential_evaporation[:,:,:,end] .* i_0 ./ i_m .* x .* S_series
     
     # Evaporation from the saturated fraction occurs at the full potential rate
-    Ev_sat = potential_evaporation .* A_sat
+    Ev_sat = potential_evaporation[:,:,:,end] .* A_sat
 
     # Total soil evaporation is the sum of saturated and unsaturated contributions
     return Ev_sat .+ Ev_unsat
