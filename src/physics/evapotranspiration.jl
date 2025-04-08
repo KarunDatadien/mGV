@@ -155,27 +155,32 @@ end
 
 
 function calculate_soil_evaporation(soil_moisture, soil_moisture_max, potential_evaporation, b_i)
+    # Sum the soil moisture and maximum soil moisture across the top two layers
+    topsoil_moisture = sum(soil_moisture[:, :, 1:2], dims=3)
+    topsoil_moisture_max = sum(soil_moisture_max[:, :, 1:2], dims=3)
+
     # Compute the saturated area fraction
-    A_sat = 1.0 .- (1.0 .- soil_moisture ./ soil_moisture_max).^b_i
-    
+    A_sat = 1.0 .- (1.0 .- topsoil_moisture ./ topsoil_moisture_max) .^ b_i
+
     # Compute the unsaturated area fraction
     x = 1.0 .- A_sat
 
     # Approximate the series expansion from eq. (15) using the first four terms
     S_series = 1.0 .+
-               (b_i ./ (1.0 .+ b_i)) .* x.^(1.0 ./ b_i) .+
-               (b_i ./ (2.0 .+ b_i)) .* x.^(2.0 ./ b_i) .+
-               (b_i ./ (3.0 .+ b_i)) .* x.^(3.0 ./ b_i)
-    
-    i_m = (1.0 .+ b_i).*soil_moisture_max # Max infiltration, Eq. 17 rewritten
-    i_0 = i_m .* (1.0 .- (1.0 .- A_sat).^(1.0 ./ b_i)) # Eq. 13, TODO: check if correct, this is how it's done in VIC-WUR
+               (b_i ./ (1.0 .+ b_i)) .* x .^ (1.0 ./ b_i) .+
+               (b_i ./ (2.0 .+ b_i)) .* x .^ (2.0 ./ b_i) .+
+               (b_i ./ (3.0 .+ b_i)) .* x .^ (3.0 ./ b_i)
 
-    # This factor adjusts the unsaturated evaporation contribution
-    Ev_unsat = potential_evaporation[:,:,:,end] .* i_0 ./ i_m .* x .* S_series
-    
-    # Evaporation from the saturated fraction occurs at the full potential rate
-    Ev_sat = potential_evaporation[:,:,:,end] .* A_sat
+    i_m = (1.0 .+ b_i) .* topsoil_moisture_max  # Max infiltration, Eq. 17 rewritten
+    i_0 = i_m .* (1.0 .- (1.0 .- A_sat) .^ (1.0 ./ b_i))  # Eq. 13
 
-    # Total soil evaporation is the sum of saturated and unsaturated contributions
+    # Unsaturated evaporation contribution
+    Ev_unsat = potential_evaporation[:, :, :, end] .* i_0 ./ i_m .* x .* S_series
+
+    # Saturated evaporation contribution
+    Ev_sat = potential_evaporation[:, :, :, end] .* A_sat
+
+    # Total soil evaporation
     return Ev_sat .+ Ev_unsat
 end
+
