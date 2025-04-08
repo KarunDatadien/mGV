@@ -47,6 +47,11 @@ if CASE == "global"
     expt_var = "expt"
     b_infilt_var = "infilt"
 
+    # === Subsurface Parameters ===
+    Ds_var = "Ds" #fraction
+    Dsmax_var = "Dsmax" #mm/day
+    Ws_var = "Ws" #fraction
+
     prec_var = "prec"
     tair_var = "tair"
     wind_var = "wind" 
@@ -112,6 +117,11 @@ elseif CASE == "indus"
     soil_dens_var = "soil_density" #soil_density(nlayer, lat, lon) 
     expt_var = "expt"
     b_infilt_var = "infilt"
+
+    # === Subsurface Parameters ===
+    Ds_var = "Ds" #fraction
+    Dsmax_var = "Dsmax" #mm/day
+    Ws_var = "Ws" #fraction
 
     prec_var = "pr"
     tair_var = "tas"
