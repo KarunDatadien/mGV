@@ -20,6 +20,7 @@ include("src/init/init_calc.jl")
 include("src/physics/physics.jl")
 include("src/physics/evapotranspiration.jl")
 include("src/physics/groundwater.jl")
+include("src/physics/runoff.jl")
 include("src/physics/temperature.jl")
 
 # Load user-modifiable configuration

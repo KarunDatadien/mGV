@@ -8,6 +8,7 @@ function create_output_netcdf(output_file::String, reference_array, reference_ar
     defDim(out_ds, "time",  size(reference_array, 3))
     defDim(out_ds, "nveg",  size(reference_array2, 4))
     defDim(out_ds, "layer", 3)
+    defDim(out_ds, "top_layer", 1)
 
     # Define the output variables to be written
     pr_scaled = defVar(out_ds, "scaled_precipitation", Float32, ("lon", "lat", "time"),
@@ -44,7 +45,7 @@ function create_output_netcdf(output_file::String, reference_array, reference_ar
     max_water_storage_summed_output.attrib["units"] = "mm"
     max_water_storage_summed_output.attrib["description"] = "The maximum amount of water intercepted by the canopy"
 
-    soil_evaporation_output = defVar(out_ds, "soil_evaporation_output", Float32, ("lon", "lat", "time", "layer"))
+    soil_evaporation_output = defVar(out_ds, "soil_evaporation_output", Float32, ("lon", "lat", "time", "top_layer"))
 
     # Set attributes                     
     pr_scaled.attrib["units"]       = "mm/day"
