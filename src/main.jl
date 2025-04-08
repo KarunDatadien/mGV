@@ -25,16 +25,6 @@ println("Loading parameter data and allocating memory...")
     (b_infilt_cpu,   b_infilt_gpu)   = read_and_allocate_parameter(b_infilt_var)   
 end
 
-# === Initial States ===
-global water_storage = CUDA.fill(Float32(0.1), size(coverage_gpu))  # Fill with 0.1 on GPU
-global throughfall   = CUDA.zeros(Float32, size(coverage_gpu))      # Allocate zeros on GPU
-global bulk_dens_min = CUDA.zeros(Float32, size(bulk_dens_gpu))      
-global soil_dens_min = CUDA.zeros(Float32, size(bulk_dens_gpu))      
-global porosity      = CUDA.zeros(Float32, size(bulk_dens_gpu))      
-global soil_moisture_new = CUDA.zeros(Float32, size(soil_dens_gpu))      
-global soil_moisture_max = CUDA.zeros(Float32, size(soil_dens_gpu))      
-
-
 gpu_load_static_inputs([rmin_cpu, rarc_cpu, elev_cpu, ksat_cpu, residmoist_cpu, init_moist_cpu, root_cpu,
                         Wcr_cpu, Wfc_cpu, Wpwp_cpu, depth_cpu, quartz_cpu,
                         bulk_dens_cpu, soil_dens_cpu, expt_cpu, b_infilt_cpu],
@@ -43,6 +33,15 @@ gpu_load_static_inputs([rmin_cpu, rarc_cpu, elev_cpu, ksat_cpu, residmoist_cpu, 
                         bulk_dens_gpu, soil_dens_gpu, expt_gpu, b_infilt_gpu])
 
 reshape_static_inputs!()
+
+# === Initial States ===
+global water_storage = CUDA.fill(Float32(0.1), size(coverage_gpu))  # Fill with 0.1 on GPU
+global throughfall   = CUDA.zeros(Float32, size(coverage_gpu))      # Allocate zeros on GPU
+global bulk_dens_min = CUDA.zeros(Float32, size(bulk_dens_gpu))      
+global soil_dens_min = CUDA.zeros(Float32, size(bulk_dens_gpu))      
+global porosity      = CUDA.zeros(Float32, size(bulk_dens_gpu))      
+global soil_moisture_new = CUDA.zeros(Float32, size(soil_dens_gpu))      
+global soil_moisture_max = CUDA.zeros(Float32, size(soil_dens_gpu))    
 
 soil_moisture_new = init_moist_gpu
 
@@ -76,7 +75,7 @@ function process_year(year)
     @time out_ds, prec_scaled, water_storage_output, Q12_output, tair_output, tsurf_output, 
     canopy_evaporation_output, canopy_evaporation_summed_output, transpiration_output, aerodynamic_resistance_output, 
     potential_evaporation_output, potential_evaporation_summed_output, net_radiation_output, 
-    net_radiation_summed_output, max_water_storage_output, max_water_storage_summed_output = create_output_netcdf(output_file, prec_cpu, LAI_cpu)
+    net_radiation_summed_output, max_water_storage_output, max_water_storage_summed_output, soil_evaporation_output = create_output_netcdf(output_file, prec_cpu, LAI_cpu)
 
     println("Running...") 
     num_days = size(prec_cpu, 3)
@@ -131,10 +130,24 @@ function process_year(year)
             throughfall = max.(0, new_water_storage .- max_water_storage)
             water_storage = clamp.(new_water_storage, 0, max_water_storage)
 
-            soil_evaporation = calculate_soil_evaporation(soil_moisture_new, soil_moisture_max, potential_evaporation, b_infilt_gpu)
+            soil_evaporation = calculate_soil_evaporation(soil_moisture_old, soil_moisture_max, potential_evaporation, b_infilt_gpu)
+            println("soil_evaporation size: ", size(soil_evaporation))
+            println("soil_moisture_old size: ", size(soil_moisture_old))
+            println("soil_moisture_new size: ", size(soil_moisture_new))
+            println("b_infilt_gpu size: ", size(b_infilt_gpu))
+            println("potential_evaporation size: ", size(potential_evaporation))
+            println("potential_evaporation[:,:,:,end] size: ", size(potential_evaporation[:,:,:,end]))
+
+            # soil_evaporation size: (204, 180, 3)
+            # soil_moisture_old size: (204, 180, 3)
+            # soil_moisture_new size: (204, 180, 3)
+            # potential_evaporation size: (204, 180, 1, 22)
+            # potential_evaporation[:,:,:,end] size: (204, 180, 1)
 
             ## Drainage from layer 1 to 2; Q12
-            Q12 = ksat_gpu[:, :, 1] .* ((soil_moisture_old[:, :, 1] .- residmoist_gpu[:, :, 1]) ./ (soil_moisture_max[:, :, 1] .- residmoist_gpu[:, :, 1])) .^ expt_gpu[:, :, 1]
+            Q12 = ksat_gpu[:, :, 1] .* ((soil_moisture_old[:, :, 1:2] .- residmoist_gpu[:, :, 1]) ./ (soil_moisture_max[:, :, 1] .- residmoist_gpu[:, :, 1])) .^ expt_gpu[:, :, 1] # Eq. (20)
+            println("Q12 size: ", size(Q12))
+
 
             ## Water balance layer 1 and direct surface runoff
             #Q_surface = gw.calculate_Q_surface(current_precipitation, time_step_placeholder, soil_moisture_max[0,:,:], soil_moisture_old[0,:,:], i_0, max_infil)
@@ -142,7 +155,7 @@ function process_year(year)
             #soil_moisture_new[0,:,:] = soil_moisture_old[0,:,:] + (current_precipitation - Q_surface[0,:,:] - Q12[0,:,:] - E1)*time_step_placeholder
             
             # temporary check:
-            soil_moisture_new[:,:,1] = soil_moisture_old[:,:,1] .+ 1.0 #.+ prec_gpu
+            soil_moisture_new[:,:,1:2] = soil_moisture_old[:,:,1:2] .+ prec_gpu
 
             ## Water balance layer 2 and subsurface runoff
             #E2 = 0 # Liang et al.: "Evaporation from bare soil is extracted only from layer 1; bare soil evaporation from layer 2 (E2) is assumed to be zero."
@@ -242,7 +255,7 @@ function process_year(year)
             summed_on_gpu4 = ifelse.(sum(x -> isnan(x) ? 0 : 1, canopy_evaporation, dims=4) .== 0, NaN, summed_on_gpu4) # TODO: pre-allocate this?
 
             canopy_evaporation_summed_output[:, :, day] = Array(summed_on_gpu4)
-b_infilt
+
 
             transpiration_output[:, :, day, :] = Array(transpiration)
 
@@ -250,7 +263,7 @@ b_infilt
           #  tsurf_output[:, :, day, :, :] = Array(tsurf)
             water_storage_output[:, :, day, :] = Array(water_storage)
             prec_scaled[:, :, day] = Array(prec_gpu)
-            Q12_output[:, :, day] = Array(Q12)
+            #Q12_output[:, :, day] = Array(Q12)
 
 
 
@@ -273,6 +286,8 @@ b_infilt
             
             max_water_storage_summed_output[:, :, day] = Array(summed_on_gpu3)
 
+            println("soil_evaporation: ", size(soil_evaporation))
+            soil_evaporation_output[: , :, day, :] = Array(soil_evaporation)
 
         end
         
