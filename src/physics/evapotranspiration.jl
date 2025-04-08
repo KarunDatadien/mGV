@@ -100,7 +100,8 @@ end
 
 function calculate_max_water_storage(LAI_gpu)
     # Compute maximum water intercepted/stored in the canopy cover
-    return K_L .* LAI_gpu  
+    result = K_L .* LAI_gpu
+    return ifelse.(isnan.(result) .| (result .> 1e30), 0.0, result)
 end
 
 function calculate_canopy_evaporation(water_storage, max_water_storage, potential_evaporation, aerodynamic_resistance, rarc, prec_gpu)
