@@ -45,6 +45,7 @@ if CASE == "global"
     bulk_dens_var = "bulk_density" #bulk_density(nlayer, lat, lon)
     soil_dens_var = "soil_density" #soil_density(nlayer, lat, lon) 
     expt_var = "expt"
+    b_infilt_var = "infilt"
 
     prec_var = "prec"
     tair_var = "tair"
@@ -110,6 +111,7 @@ elseif CASE == "indus"
     bulk_dens_var = "bulk_density" #bulk_density(nlayer, lat, lon)
     soil_dens_var = "soil_density" #soil_density(nlayer, lat, lon) 
     expt_var = "expt"
+    b_infilt_var = "infilt"
 
     prec_var = "pr"
     tair_var = "tas"
