@@ -47,11 +47,15 @@ function create_output_netcdf(output_file::String, reference_array, reference_ar
 
     soil_evaporation_output = defVar(out_ds, "soil_evaporation_output", Float32, ("lon", "lat", "time", "top_layer"))
 
+    soil_temperature_output = defVar(out_ds, "soil_temperature_output", Float32, ("lon", "lat", "time", "layer"))
+
+    soil_moisture_output = defVar(out_ds, "soil_moisture_output", Float32, ("lon", "lat", "time", "layer"))
+
     # Set attributes                     
     pr_scaled.attrib["units"]       = "mm/day"
     pr_scaled.attrib["description"] = "Daily precipitation scaled with GPU computations (optimized)"
 
     return out_ds, pr_scaled, water_storage_output, Q12_output, tair_output, tsurf_output, canopy_evaporation_output, canopy_evaporation_summed_output,
     transpiration_output, aerodynamic_resistance_output, potential_evaporation_output, potential_evaporation_summed_output, 
-    net_radiation_output, net_radiation_summed_output, max_water_storage_output, max_water_storage_summed_output, soil_evaporation_output
+    net_radiation_output, net_radiation_summed_output, max_water_storage_output, max_water_storage_summed_output, soil_evaporation_output, soil_temperature_output, soil_moisture_output
 end
