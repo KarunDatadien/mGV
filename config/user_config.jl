@@ -51,6 +51,8 @@ if CASE == "global"
     Ds_var = "Ds" #fraction
     Dsmax_var = "Dsmax" #mm/day
     Ws_var = "Ws" #fraction
+    Tavg_var = "avg_T" 
+    dp_var = "dp"
 
     prec_var = "prec"
     tair_var = "tair"
@@ -122,6 +124,8 @@ elseif CASE == "indus"
     Ds_var = "Ds" #fraction
     Dsmax_var = "Dsmax" #mm/day
     Ws_var = "Ws" #fraction
+    Tavg_var = "avg_T" 
+    dp_var = "dp"
 
     prec_var = "pr"
     tair_var = "tas"
