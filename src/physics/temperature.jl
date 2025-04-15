@@ -86,3 +86,23 @@ function solve_surface_temperature(
     return Ts_new
 end
 
+function estimate_layer_temperature(depth_gpu, dp_gpu, tsurf, soil_temperature, Tavg_gpu)
+    # Based on Liang et al. (1999): Modeling ground heat flux in land surface 
+    # parameterization schemes
+
+    # Assign inputs
+    topsoil_temperature = sum(soil_temperature[:, :, 1:2], dims=3) ./ 2  # Average of layers 1-2
+    # Taking Tavg_gpu as deep soil temperature
+
+    # Model layer 1 (my layers 1-2): Average of Tsurf and topsoil_temperature
+    soil_temperature[:, :, 1:1] .= 0.5 .* (tsurf .+ topsoil_temperature)
+    soil_temperature[:, :, 2:2] .= 0.5 .* (tsurf .+ topsoil_temperature)
+
+    # Model layer 2 (my layer 3)
+    soil_temperature[:, :, 3:3] .= Tavg_gpu .- (dp_gpu ./ depth_gpu[:, :, 3:3]) .* 
+                                   (topsoil_temperature .- Tavg_gpu) .* 
+                                   (exp.(-(depth_gpu[:, :, 2:2] .+ depth_gpu[:, :, 3:3]) ./ dp_gpu) .- 
+                                    exp.(-depth_gpu[:, :, 2:2] ./ dp_gpu))
+
+    return soil_temperature
+end
