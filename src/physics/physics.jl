@@ -19,6 +19,6 @@ function calculate_scale_height(tair_gpu, elev)
 end
 
 # Latent Heat of Vaporization
-function calculate_latent_heat(temp::CuArray{Float32})
+function calculate_latent_heat(temp)
     return lat_vap .- 2361.0 .* temp # [J/kg]
 end

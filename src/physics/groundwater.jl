@@ -185,5 +185,5 @@ function update_bottomsoil_moisture(
     # Update the full soil_moisture_old array with the new bottom layer values
     soil_moisture_old[:, :, 3:3] = bottomsoil_moisture_new
 
-    return soil_moisture_old, subsurface_runoff_total
+    return soil_moisture_old[:, :, 3:3], subsurface_runoff_total
 end

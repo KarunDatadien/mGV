@@ -79,7 +79,7 @@ function calculate_potential_evaporation(tair_gpu, vp_gpu, elev_gpu, net_radiati
     psychrometric_constant = 1628.6 .* surface_pressure ./ latent_heat # [Pa/K]
     println("psychrometric_constant[50,10] = ", Array(psychrometric_constant)[50, 10])
 
-    air_density    = 0.003486 .* surface_pressure ./ (273.15 .+ tair_gpu) # [kg/m^3]
+    air_density = 0.003486 .* surface_pressure ./ (273.15 .+ tair_gpu) # [kg/m^3]
     println("air_density[50,10] = ", Array(air_density)[50, 10])
 
 
