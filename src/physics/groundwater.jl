@@ -7,12 +7,12 @@ function soil_conductivity(moist, ice_frac, soil_dens_min, bulk_dens_min, quartz
     Kdry_min = (0.135 .* bulk_dens_min .+ 64.7) ./ (soil_dens_min .- 0.947 .* bulk_dens_min)
     Kdry = (1 .- organic_frac) .* Kdry_min .+ organic_frac .* Kdry_org
 
-    println("soil_dens_min: ", minimum(soil_dens_min), " / ", maximum(soil_dens_min))
-    println("bulk_dens_min: ", minimum(bulk_dens_min), " / ", maximum(bulk_dens_min))
+ #   println("soil_dens_min: ", minimum(soil_dens_min), " / ", maximum(soil_dens_min))
+ #   println("bulk_dens_min: ", minimum(bulk_dens_min), " / ", maximum(bulk_dens_min))
 
-    println("Kdry_min: ", minimum(Kdry_min), " / ", maximum(Kdry_min))
-    println("Kdry_org: ", minimum(Kdry_org), " / ", maximum(Kdry_org))
-    println("Kdry: ", minimum(Kdry), " / ", maximum(Kdry))
+ #   println("Kdry_min: ", minimum(Kdry_min), " / ", maximum(Kdry_min))
+ #   println("Kdry_org: ", minimum(Kdry_org), " / ", maximum(Kdry_org))
+ #   println("Kdry: ", minimum(Kdry), " / ", maximum(Kdry))
 
     # Fractional degree of saturation
     Sr = ifelse.(porosity .> 0, moist ./ porosity, 0.0)
@@ -25,23 +25,23 @@ function soil_conductivity(moist, ice_frac, soil_dens_min, bulk_dens_min, quartz
                             0.0))
 
     Ks = (1 .- organic_frac) .* Ks_min .+ organic_frac .* Ks_org
-    println("CHECK! organic_frac: ", minimum(organic_frac), " / ", maximum(organic_frac))
-    println("Ks_min: ", minimum(Ks_min), " / ", maximum(Ks_min))
-    println("Ks_org: ", minimum(Ks_org), " / ", maximum(Ks_org))
+ #   println("CHECK! organic_frac: ", minimum(organic_frac), " / ", maximum(organic_frac))
+ #   println("Ks_min: ", minimum(Ks_min), " / ", maximum(Ks_min))
+#    println("Ks_org: ", minimum(Ks_org), " / ", maximum(Ks_org))
 
     # Calculate Ksat depending on whether the soil is unfrozen (Wu == moist) or partially frozen
     Ksat = ifelse.(Wu .== moist,
                   Ks .^ (1.0 .- porosity) .* Kw .^ porosity,
                   Ks .^ (1.0 .- porosity) .* Ki .^ (porosity .- Wu) .* Kw .^ Wu)
 
-    println("Ksat: ", minimum(Ksat), " / ", maximum(Ksat))
+#    println("Ksat: ", minimum(Ksat), " / ", maximum(Ksat))
 
     # Compute the effective saturation parameter, Ke
     Ke = ifelse.(Wu .== moist,
                 0.7 .* log10.(max.(Sr, 1e-10)) .+ 1.0,
                 Sr)
 
-    println("Ke: ", minimum(Ke), " / ", maximum(Ke))
+ #   println("Ke: ", minimum(Ke), " / ", maximum(Ke))
 
     # Final Kappa calculation using ifelse to handle moist > 0 condition
     Kappa = ifelse.(moist .> 0,
@@ -49,7 +49,7 @@ function soil_conductivity(moist, ice_frac, soil_dens_min, bulk_dens_min, quartz
                    Kdry)
 
 
-    println("Kappa: ", minimum(Kappa), " / ", maximum(Kappa))
+ #   println("Kappa: ", minimum(Kappa), " / ", maximum(Kappa))
 
     return Kappa
 end

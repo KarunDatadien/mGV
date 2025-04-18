@@ -1,6 +1,9 @@
 using .SimConstants
 println("Loading parameter data and allocating memory...")
 
+using TimerOutputs
+const to = TimerOutputs.TimerOutput()
+
 @time begin
     (d0_cpu,         d0_gpu)         = read_and_allocate_parameter(d0_var)
     (z0_cpu,         z0_gpu)         = read_and_allocate_parameter(z0_var)
@@ -29,6 +32,7 @@ println("Loading parameter data and allocating memory...")
     (dp_cpu,         dp_gpu)         = read_and_allocate_parameter(dp_var)
     (Tavg_cpu,       Tavg_gpu)       = read_and_allocate_parameter(Tavg_var)
 end
+println("Loading gpu_load_static_inputs...")
 
 gpu_load_static_inputs([rmin_cpu, rarc_cpu, elev_cpu, ksat_cpu, residmoist_cpu, init_moist_cpu, root_cpu,
                         Wcr_cpu, Wfc_cpu, Wpwp_cpu, depth_cpu, quartz_cpu,
@@ -39,7 +43,10 @@ gpu_load_static_inputs([rmin_cpu, rarc_cpu, elev_cpu, ksat_cpu, residmoist_cpu, 
                         bulk_dens_gpu, soil_dens_gpu, expt_gpu, b_infilt_gpu,
                         Ds_gpu, Dsmax_gpu, Ws_gpu, dp_gpu, Tavg_gpu])
 
+                        println("DONE Loading gpu_load_static_inputs...")
+
 reshape_static_inputs!()
+                        println("DONE Loading gpu_load_static_inputs...")
 
 # === Initial States ===
 global water_storage = CUDA.fill(Float32(0.1), size(coverage_gpu))  # Fill with 0.1 on GPU
@@ -54,6 +61,7 @@ global soil_temperature = CUDA.zeros(Float32, size(soil_dens_gpu))
 global Lsum = CUDA.zeros(Float32, size(soil_dens_gpu))
 global tsurf = CUDA.zeros(Float64, size(d0_gpu))
 global tsurf_n = CUDA.zeros(Float64, size(albedo_gpu))
+println("DONE Loading gpu_load_static_inputs...")
 
 
 soil_moisture_new = init_moist_gpu
@@ -106,18 +114,19 @@ function process_year(year)
 
     # Start year long loop with daily timestep
     @showprogress "Processing year $year (GPU)..." for day in 1:num_days
+        @timeit to "process_year" begin
         month = day_to_month(day, year)
         
         if GPU_USE == true
             # Explicitly copy preloaded data to the GPU
-            gpu_load_monthly_inputs(month, month_prev, 
+            @timeit to "gpu_load_monthly_inputs" gpu_load_monthly_inputs(month, month_prev, 
                                     [d0_cpu, z0_cpu, LAI_cpu, albedo_cpu, coverage_cpu], 
                                     [d0_gpu, z0_gpu, LAI_gpu, albedo_gpu, coverage_gpu])
-            gpu_load_daily_inputs(day, day_prev, 
+            @timeit to "gpu_load_daily_inputs" gpu_load_daily_inputs(day, day_prev, 
                                   [prec_cpu, tair_cpu, wind_cpu, vp_cpu, swdown_cpu, lwdown_cpu], 
                                   [prec_gpu, tair_gpu, wind_gpu, vp_gpu, swdown_gpu, lwdown_gpu])
                                   
-            println("day: ", day)
+            @timeit to "prints" println("day: ", day)
 
             # For the first timestep we set tsurf = tair (see page 14,421 of Liang et al. (1994)):
             if day == 1 && year == start_year  # Replace first_year with your starting year variable
@@ -129,35 +138,28 @@ function process_year(year)
                 println("tsurf_n size: ", size(tsurf_n))
             end
 
-            #tsurf = tair_gpu  # TODO: make tsurf global such that it's carried over to next year, and also needs to be set only on the first timestep
-            #nveg = size(albedo_gpu, 4)  # 22
-            #tsurf_n = repeat(tsurf, outer=(1, 1, 1, nveg))  # (204, 180, 1, 22)
-            #println("tsurf_n size: ", size(tsurf_n))
-
-
-
-            aerodynamic_resistance = compute_aerodynamic_resistance(
+            @timeit to "compute_aerodynamic_resistance" aerodynamic_resistance = compute_aerodynamic_resistance(
                 z2, d0_gpu, z0_gpu, K, tsurf, tair_gpu, wind_gpu
             ) # Eq. (3). 🚧 TODO: check once solve_surface_temperature function has been checked
 
-            net_radiation = calculate_net_radiation(
+            @timeit to "calculate_net_radiation" net_radiation = calculate_net_radiation(
                 swdown_gpu, lwdown_gpu, albedo_gpu, tsurf
             ) # [W/m^2], works ✅
 
-            potential_evaporation = calculate_potential_evaporation(
+            @timeit to "calculate_potential_evaporation" potential_evaporation = calculate_potential_evaporation(
                 tair_gpu, vp_gpu, elev_gpu, net_radiation, 
                 aerodynamic_resistance, rarc_gpu
             ) # Penmann-Monteith equation with canopy resistance set to 0 , output in [mm/day], works ✅
 
-            max_water_storage = calculate_max_water_storage(LAI_gpu) # Eq. (2), works ✅ TODO: this only needs to be calculated ONCE, so put outside the loop
+            @timeit to "calculate_max_water_storage" max_water_storage = calculate_max_water_storage(LAI_gpu) # Eq. (2), works ✅ TODO: this only needs to be calculated ONCE, so put outside the loop
 
-            canopy_evaporation = calculate_canopy_evaporation(
+            @timeit to "calculate_canopy_evaporation" canopy_evaporation = calculate_canopy_evaporation(
                 water_storage, max_water_storage, potential_evaporation, aerodynamic_resistance, rarc_gpu, prec_gpu
             ) # Eq. (1), (9) and (10), works ✅
 
             soil_moisture_old = soil_moisture_new
 
-            transpiration = calculate_transpiration(
+            @timeit to "calculate_transpiration" transpiration = calculate_transpiration(
                 potential_evaporation, aerodynamic_resistance, rarc_gpu, 
                 water_storage, max_water_storage, soil_moisture_old, soil_moisture_critical, wilting_point, 
                 root_gpu
@@ -165,60 +167,60 @@ function process_year(year)
             
 
 
-            soil_evaporation = calculate_soil_evaporation(soil_moisture_old, soil_moisture_max, potential_evaporation, b_infilt_gpu)
-            println("soil_evaporation size: ", size(soil_evaporation))
-            println("soil_moisture_old size: ", size(soil_moisture_old))
-            println("soil_moisture_new size: ", size(soil_moisture_new))
-            println("b_infilt_gpu size: ", size(b_infilt_gpu))
-            println("potential_evaporation size: ", size(potential_evaporation))
-            println("potential_evaporation[:,:,:,end] size: ", size(potential_evaporation[:,:,:,end]))
+            @timeit to "calculate_soil_evaporation" soil_evaporation = calculate_soil_evaporation(soil_moisture_old, soil_moisture_max, potential_evaporation, b_infilt_gpu)
+            
+            @timeit to "prints" begin
+                println("soil_evaporation size: ", size(soil_evaporation))
+                println("soil_moisture_old size: ", size(soil_moisture_old))
+                println("soil_moisture_new size: ", size(soil_moisture_new))
+                println("b_infilt_gpu size: ", size(b_infilt_gpu))
+                println("potential_evaporation size: ", size(potential_evaporation))
+                println("potential_evaporation[:,:,:,end] size: ", size(potential_evaporation[:,:,:,end]))
+            end
 
-            # soil_evaporation size: (204, 180, 3)
-            # soil_moisture_old size: (204, 180, 3)
-            # soil_moisture_new size: (204, 180, 3)
-            # potential_evaporation size: (204, 180, 1, 22)
-            # potential_evaporation[:,:,:,end] size: (204, 180, 1)
 
             # === Update Water Storage with Throughfall Computation; Eq. 16 ===
+            @timeit to "update_water_canopy_storage" begin 
             new_water_storage = water_storage .+ (prec_gpu .- canopy_evaporation) 
             throughfall = max.(0, new_water_storage .- max_water_storage)
             water_storage = max.(0.0, min.(new_water_storage, max_water_storage)) # works ✅
+            end
 
             # Direct surface runoff
-            surface_runoff = calculate_surface_runoff(prec_gpu, soil_moisture_old, soil_moisture_max, b_infilt_gpu) # Eq. (18a) and (18b)
+            @timeit to "calculate_soil_evaporation" surface_runoff = calculate_surface_runoff(prec_gpu, soil_moisture_old, soil_moisture_max, b_infilt_gpu) # Eq. (18a) and (18b)
 
             # Drainage from layer 1 to 2; Q12
-            Q_12 = calculate_drainage_Q12(soil_moisture_old, soil_moisture_max, ksat_gpu, residmoist_gpu, porosity) # Eq. (20) TODO: check if porosity is the correct argument here?
+            @timeit to "calculate_soil_evaporation" Q_12 = calculate_drainage_Q12(soil_moisture_old, soil_moisture_max, ksat_gpu, residmoist_gpu, porosity) # Eq. (20) TODO: check if porosity is the correct argument here?
 
             # Water balance toplayer update 
-            soil_moisture_new = update_topsoil_moisture(prec_gpu, soil_moisture_old, soil_moisture_max, surface_runoff, Q_12, soil_evaporation, depth_gpu)
+            @timeit to "update_topsoil_moisture" soil_moisture_new = update_topsoil_moisture(prec_gpu, soil_moisture_old, soil_moisture_max, surface_runoff, Q_12, soil_evaporation, depth_gpu)
 
             # Calculate subsurface runoff
-            subsurface_runoff = calculate_subsurface_runoff(soil_moisture_old, soil_moisture_max, Ds_gpu, Dsmax_gpu, Ws_gpu) # Eq. (21)           
+            @timeit to "calculate_subsurface_runoff" subsurface_runoff = calculate_subsurface_runoff(soil_moisture_old, soil_moisture_max, Ds_gpu, Dsmax_gpu, Ws_gpu) # Eq. (21)           
 
             # Update bottom soil moisture and get total subsurface runoff
-            soil_moisture_new[:, :, 3:3], subsurface_runoff_total = update_bottomsoil_moisture(
+            @timeit to "update_bottomsoil_moisture" soil_moisture_new[:, :, 3:3], subsurface_runoff_total = update_bottomsoil_moisture(
                 soil_moisture_old, soil_moisture_max, subsurface_runoff, Q_12
             ) # Eq. (22), TODO: compare this with the paper
 
-            println("canopy_evaporation: ", size(canopy_evaporation))
-            println("transpiration: ", size(transpiration))
+            @timeit to "prints" println("canopy_evaporation: ", size(canopy_evaporation))
+            @timeit to "prints" println("transpiration: ", size(transpiration))
 
 
             # TODO: implement section 2.5
-            E_n = canopy_evaporation + transpiration # + soil_evaporation
+            @timeit to "E_n sum" E_n = canopy_evaporation .+ transpiration # + soil_evaporation
     
-            ice_frac = 0.0
+            @timeit to "Set ice_frac sum" ice_frac = 0.0
 
-            kappa_array = soil_conductivity(soil_moisture_new, ice_frac, soil_dens_min, bulk_dens_min, quartz_gpu, organic_frac, porosity)
-            println("kappa_array has NaN: ", any(isnan, kappa_array), " min/max: ", minimum(kappa_array), " / ", maximum(kappa_array))
+            @timeit to "soil_conductivity" kappa_array = soil_conductivity(soil_moisture_new, ice_frac, soil_dens_min, bulk_dens_min, quartz_gpu, organic_frac, porosity)
+            @timeit to "prints" println("kappa_array has NaN: ", any(isnan, kappa_array), " min/max: ", minimum(kappa_array), " / ", maximum(kappa_array))
             
-            Cs_array = volumetric_heat_capacity(bulk_dens_gpu ./ soil_dens_gpu, soil_moisture_new, ice_frac, organic_frac)
+            @timeit to "volumetric_heat_capacity"  Cs_array = volumetric_heat_capacity(bulk_dens_gpu ./ soil_dens_gpu, soil_moisture_new, ice_frac, organic_frac)
 
-            soil_temperature = estimate_layer_temperature(depth_gpu, dp_gpu, tsurf, soil_temperature, Tavg_gpu)
+            @timeit to "estimate_layer_temperature" soil_temperature = estimate_layer_temperature(depth_gpu, dp_gpu, tsurf, soil_temperature, Tavg_gpu)
 
 
-            tsurf_n = solve_surface_temperature(
+            @timeit to "solve_surface_temperature" tsurf_n = solve_surface_temperature(
                 tsurf_n,          # Surface temperature (CuArray)
                 soil_temperature[:,:,1],    # Soil layer 1 temperature (CuArray) TODO: should be sum of 1 and 2
                 soil_temperature[:,:,2],    # Soil layer 2 temperature (CuArray) TODO: should be layer 3 (bottom)
@@ -234,8 +236,10 @@ function process_year(year)
                 E_n
             ) # TODO: issue: somehow changes canopy_evaporation and others from shape: (204, 180, 1, 22) to (204, 180, 3, 22)
 
+            # Convert tsurf_n to Float64
+            tsurf_n = convert(CuArray{Float64, 4}, tsurf_n) # TODO: do this in a more sensible way, somewhere else
 
-
+            @timeit to "outputs" begin 
             tsurf_output[:, :, day, :] = Array(tsurf_n)        
 
             println("Element type of tsurf_n: ", eltype(tsurf_n))
@@ -244,8 +248,7 @@ function process_year(year)
             println("Type of potential_evaporation: ", typeof(potential_evaporation))
 
             println("tsurf_n size: ", size(tsurf_n))
-            # Convert tsurf_n to Float64
-            tsurf_n = convert(CuArray{Float64, 4}, tsurf_n)
+
             # sum tsurf_n to tsurf: 
             summed_on_gpu5 = dropdims(
                 sum(x -> isnan(x) ? 0.0 : x, tsurf_n, dims=4) .* 
@@ -354,29 +357,35 @@ function process_year(year)
             soil_temperature_output[: , :, day, :] = Array(soil_temperature)
 
             soil_moisture_output[: , :, day, :] = Array(soil_moisture_old)
+            end # timeit output
 
-        end
+        end # gpu use
         
         day_prev = day
         month_prev = month
-    end
+    end # timeit year loop
+
+    end # year loop
 
     println("Closing output file...")
-    close(out_ds)
+    @timeit to "closing outputfile" close(out_ds)
     
     println("============ Completed run for year: $year ============\n")
     println("Postprocessing for year $year...")
-    compress_file_async(output_file, 1)
+    @timeit to "compress_file_async call" compress_file_async(output_file, 1)
 end
 
 # Main loop over years:
 for year in start_year:end_year
     if has_input_files(year)
         process_year(year)
-        GC.gc()  # Force garbage collection after processing each year
+        show(to)
+        @timeit to "garbage collection" begin 
+        Base.GC.gc()  # Force garbage collection after processing each year TODO: does this actually do anything?
+        CUDA.reclaim() # TODO: check does this actually do anything?
+        end
     else
         println("Skipping year $year due to missing input files.")
     end
 end
-
 println("Done!")

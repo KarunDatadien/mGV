@@ -2,11 +2,11 @@ function compute_aerodynamic_resistance(z2, d0_gpu, z0_gpu, K, tsurf, tair_gpu, 
     # Compute a²[n] and c
     a_squared = (K^2) ./ (log.((z2 .- d0_gpu) ./ z0_gpu).^2)
 
-    println("LOG TERM!: ", minimum(log.((z2 .- d0_gpu) ./ z0_gpu)), " / ", maximum(log.((z2 .- d0_gpu) ./ z0_gpu)))
-    println("z2: ", minimum(z2), " / ", maximum(z2))
-    println("K: ", minimum(K), " / ", maximum(K))
-    println("d0_gpu: ", minimum(d0_gpu), " / ", maximum(d0_gpu))
-    println("z0_gpu: ", minimum(z0_gpu), " / ", maximum(z0_gpu))
+#    println("LOG TERM!: ", minimum(log.((z2 .- d0_gpu) ./ z0_gpu)), " / ", maximum(log.((z2 .- d0_gpu) ./ z0_gpu)))
+#    println("z2: ", minimum(z2), " / ", maximum(z2))
+#    println("K: ", minimum(K), " / ", maximum(K))
+#    println("d0_gpu: ", minimum(d0_gpu), " / ", maximum(d0_gpu))
+#    println("z0_gpu: ", minimum(z0_gpu), " / ", maximum(z0_gpu))
 
     c_coefficient = 49.82 .* a_squared .* sqrt.((z2 .- d0_gpu) ./ z0_gpu)
     
@@ -35,14 +35,14 @@ function compute_aerodynamic_resistance(z2, d0_gpu, z0_gpu, K, tsurf, tair_gpu, 
     transfer_coefficient = 1.351 .* a_squared .* Fw
     aerodynamic_resistance = 1 ./ (transfer_coefficient .* wind_gpu)
 
-    println("a_squared: ", minimum(a_squared), " / ", maximum(a_squared))
-    println("Fw: ", minimum(Fw), " / ", maximum(Fw))
-
-    println("transfer_coefficient: ", minimum(transfer_coefficient), " / ", maximum(transfer_coefficient))
-    println("wind_gpu: ", minimum(wind_gpu), " / ", maximum(wind_gpu))
-
-
-    println("aerodynamic_resistance: ", minimum(aerodynamic_resistance), " / ", maximum(aerodynamic_resistance))
+#    println("a_squared: ", minimum(a_squared), " / ", maximum(a_squared))
+#    println("Fw: ", minimum(Fw), " / ", maximum(Fw))
+#
+#    println("transfer_coefficient: ", minimum(transfer_coefficient), " / ", maximum(transfer_coefficient))
+#    println("wind_gpu: ", minimum(wind_gpu), " / ", maximum(wind_gpu))
+#
+#
+#    println("aerodynamic_resistance: ", minimum(aerodynamic_resistance), " / ", maximum(aerodynamic_resistance))
 
     return aerodynamic_resistance
 end
