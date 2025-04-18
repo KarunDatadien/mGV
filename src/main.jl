@@ -239,125 +239,74 @@ function process_year(year)
             # Convert tsurf_n to Float64
             tsurf_n = convert(CuArray{Float64, 4}, tsurf_n) # TODO: do this in a more sensible way, somewhere else
 
-            @timeit to "outputs" begin 
-            tsurf_output[:, :, day, :] = Array(tsurf_n)        
-
-            println("Element type of tsurf_n: ", eltype(tsurf_n))
-            println("Element type of potential_evaporation: ", eltype(potential_evaporation))
-            println("Type of tsurf_n: ", typeof(tsurf_n))
-            println("Type of potential_evaporation: ", typeof(potential_evaporation))
-
-            println("tsurf_n size: ", size(tsurf_n))
-
-            # sum tsurf_n to tsurf: 
-            summed_on_gpu5 = dropdims(
-                sum(x -> isnan(x) ? 0.0 : x, tsurf_n, dims=4) .* 
-                (sum(x -> isnan(x) ? 0.0 : 1.0, tsurf_n, dims=4) .> 0.0), 
-                dims=4)
-            # Replace all-NaN sums with NaN
-            summed_on_gpu5 = ifelse.(sum(x -> isnan(x) ? 0 : 1, tsurf_n, dims=4) .== 0, NaN, summed_on_gpu5)
-
-            tsurf_summed_output[:, :, day] = Array(summed_on_gpu5)     
-
-            # Write results to the NetCDF file from the GPU
-            #water_storage_summed_output[:, :, day] = Array(sum(water_storage; dims=4)[:, :, :, 1])
-            println("tsurf size: ", size(tsurf))
-            println("tair size: ", size(tair_gpu))
-
-            # TODO: write the summing into a function 
-
-            potential_evaporation_output[:, :, day, :] = Array(potential_evaporation)
-
-            # Sum while skipping NaN
-            summed_on_gpu = dropdims(
-                sum(x -> isnan(x) ? 0.0 : x, potential_evaporation, dims=4) .* 
-                (sum(x -> isnan(x) ? 0 : 1, potential_evaporation, dims=4) .> 0), 
-                dims=4)
-            # Replace all-NaN sums with NaN
-            summed_on_gpu = ifelse.(sum(x -> isnan(x) ? 0 : 1, potential_evaporation, dims=4) .== 0, NaN, summed_on_gpu) # TODO: pre-allocate this?
-
-            # Transfer to CPU and assign
-            potential_evaporation_summed_output[:, :, day] = Array(summed_on_gpu)
-
-            println("net_radiation: ", size(net_radiation))
-
-            # Replace extreme values with NaN to avoid overflow issues and allow proper summing
-            net_radiation .= ifelse.(
-                abs.(net_radiation) .> 1e25,  # or 1e30 if you want stricter
-                NaN,
-                net_radiation
-            )
-                        
-            net_radiation_output[:, :, day, :] = Array(net_radiation)
-
-            # Sum while skipping NaN
-            summed_on_gpu2 = dropdims(
-                sum(x -> isnan(x) ? 0.0 : x, net_radiation, dims=4) .* 
-                (sum(x -> isnan(x) ? 0 : 1, net_radiation, dims=4) .> 0), 
-                dims=4)
-            # Replace all-NaN sums with NaN
-            summed_on_gpu2 = ifelse.(sum(x -> isnan(x) ? 0 : 1, net_radiation, dims=4) .== 0, NaN, summed_on_gpu2) # TODO: pre-allocate this?
-
-            net_radiation_summed_output[:, :, day] = Array(summed_on_gpu2)
-
-            println("aerodynamic_resistance: ", size(aerodynamic_resistance))
+            @timeit to "outputs" begin
+                # Helper function to sum over a dimension with NaN handling
+                function sum_with_nan_handling(arr::CuArray, dim::Int)
+                    # Replace NaNs with zero for summation
+                    arr_no_nan = ifelse.(isnan.(arr), 0.0, arr)
+                    # Compute sum over specified dimension
+                    sum_non_nan = dropdims(sum(arr_no_nan, dims=dim), dims=dim)
+                    # Count non-NaN elements; if zero, all were NaN
+                    count_non_nan = dropdims(sum(.!isnan.(arr), dims=dim), dims=dim)
+                    # Replace sum with NaN where all elements were NaN
+                    summed = ifelse.(count_non_nan .== 0, NaN, sum_non_nan)
+                    return summed
+                end
             
-            aerodynamic_resistance_output[:, :, day, :] = Array(aerodynamic_resistance)
-
-            # Replace extreme values with NaN to avoid overflow issues and allow proper summing
-            canopy_evaporation .= ifelse.(
-                abs.(canopy_evaporation) .> 1e25,  # or 1e30 if you want stricter
-                NaN,
-                canopy_evaporation
-            )
-
-            canopy_evaporation_output[:, :, day, :] = Array(canopy_evaporation)
-
-            # Sum while skipping NaN
-            summed_on_gpu4 = dropdims(
-                sum(x -> isnan(x) ? 0.0 : x, canopy_evaporation, dims=4) .* 
-                (sum(x -> isnan(x) ? 0 : 1, canopy_evaporation, dims=4) .> 0), 
-                dims=4)
-            # Replace all-NaN sums with NaN
-            summed_on_gpu4 = ifelse.(sum(x -> isnan(x) ? 0 : 1, canopy_evaporation, dims=4) .== 0, NaN, summed_on_gpu4) # TODO: pre-allocate this?
-
-            canopy_evaporation_summed_output[:, :, day] = Array(summed_on_gpu4)
-
-            transpiration_output[:, :, day, :] = Array(transpiration)
-
-            tair_output[:, :, day] = Array(tair_gpu)
-   
+                ### Variables without fill-value replacement ###
             
-            water_storage_output[:, :, day, :] = Array(water_storage)
-            prec_scaled[:, :, day] = Array(prec_gpu)
-            Q12_output[:, :, day] = Array(Q_12)
-
-            # Replace extreme values with NaN to avoid overflow issues and allow proper summing
-            max_water_storage .= ifelse.(
-                abs.(max_water_storage) .> 1e25,  # or 1e30 if you want stricter
-                NaN,
-                max_water_storage
-            )
-
-            max_water_storage_output[:, :, day, :] = Array(max_water_storage)
-
-            # Sum while skipping NaN
-            summed_on_gpu3 = dropdims(
-                sum(x -> isnan(x) ? 0.0 : x, max_water_storage, dims=4) .* 
-                (sum(x -> isnan(x) ? 0 : 1, max_water_storage, dims=4) .> 0), 
-                dims=4)
-            # Replace all-NaN sums with NaN
-            summed_on_gpu3 = ifelse.(sum(x -> isnan(x) ? 0 : 1, max_water_storage, dims=4) .== 0, NaN, summed_on_gpu3) # TODO: pre-allocate this?
+                # Surface temperature
+                tsurf_output[:, :, day, :] = Array(tsurf_n)
+                tsurf_summed_output[:, :, day] = Array(sum_with_nan_handling(tsurf_n, 4))
             
-            max_water_storage_summed_output[:, :, day] = Array(summed_on_gpu3)
-
-            println("soil_evaporation: ", size(soil_evaporation))
-            soil_evaporation_output[: , :, day, :] = Array(soil_evaporation)
-
-            soil_temperature_output[: , :, day, :] = Array(soil_temperature)
-
-            soil_moisture_output[: , :, day, :] = Array(soil_moisture_old)
-            end # timeit output
+                # Potential evaporation
+                potential_evaporation_output[:, :, day, :] = Array(potential_evaporation)
+                potential_evaporation_summed_output[:, :, day] = Array(sum_with_nan_handling(potential_evaporation, 4))
+            
+                # Aerodynamic resistance
+                aerodynamic_resistance_output[:, :, day, :] = Array(aerodynamic_resistance)
+            
+                # Transpiration
+                transpiration_output[:, :, day, :] = Array(transpiration)
+            
+                # Air temperature
+                tair_output[:, :, day] = Array(tair_gpu)
+            
+                # Water storage
+                water_storage_output[:, :, day, :] = Array(water_storage)
+            
+                # Precipitation
+                prec_scaled[:, :, day] = Array(prec_gpu)
+            
+                # Q12
+                Q12_output[:, :, day] = Array(Q_12)
+            
+                # Soil evaporation
+                soil_evaporation_output[:, :, day, :] = Array(soil_evaporation)
+            
+                # Soil temperature
+                soil_temperature_output[:, :, day, :] = Array(soil_temperature)
+            
+                # Soil moisture
+                soil_moisture_output[:, :, day, :] = Array(soil_moisture_old)
+            
+                ### Variables with fill-value value replacement ###
+            
+                # Net radiation
+                net_radiation_processed = ifelse.(abs.(net_radiation) .> 1e25, NaN, net_radiation)
+                net_radiation_output[:, :, day, :] = Array(net_radiation_processed)
+                net_radiation_summed_output[:, :, day] = Array(sum_with_nan_handling(net_radiation_processed, 4))
+            
+                # Canopy evaporation
+                canopy_evaporation_processed = ifelse.(abs.(canopy_evaporation) .> 1e25, NaN, canopy_evaporation)
+                canopy_evaporation_output[:, :, day, :] = Array(canopy_evaporation_processed)
+                canopy_evaporation_summed_output[:, :, day] = Array(sum_with_nan_handling(canopy_evaporation_processed, 4))
+            
+                # Maximum water storage
+                max_water_storage_processed = ifelse.(abs.(max_water_storage) .> 1e25, NaN, max_water_storage)
+                max_water_storage_output[:, :, day, :] = Array(max_water_storage_processed)
+                max_water_storage_summed_output[:, :, day] = Array(sum_with_nan_handling(max_water_storage_processed, 4))
+            end
 
         end # gpu use
         
