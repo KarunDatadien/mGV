@@ -3,23 +3,17 @@ function solve_surface_temperature(
     Rs::CuArray, RL::CuArray, rh::CuArray, kappa::CuArray,
     D1, D2, delta_t, Cs::CuArray, E_n::CuArray
 )
-    # === Constants (assumed globally defined in Main) ===
-    @assert isdefined(Main, :lat_vap) "lat_vap is undefined"
-    @assert isdefined(Main, :c_p_air) "c_p_air is undefined"
-    @assert isdefined(Main, :emissivity) "emissivity is undefined"
-    @assert isdefined(Main, :sigma) "sigma is undefined"
-    @assert isdefined(Main, :p_std) "p_std is undefined"
     
     # Debugging prints (synchronize GPU before printing)
-    println("Cs has NaN: ", any(isnan, Cs), " min/max: ", minimum(Cs), " / ", maximum(Cs))
-    println("kappa has NaN: ", any(isnan, kappa), " min/max: ", minimum(kappa), " / ", maximum(kappa))
-    println("rh has NaN: ", any(isnan, rh), " min/max: ", minimum(rh), " / ", maximum(rh))
+#    println("Cs has NaN: ", any(isnan, Cs), " min/max: ", minimum(Cs), " / ", maximum(Cs))
+#    println("kappa has NaN: ", any(isnan, kappa), " min/max: ", minimum(kappa), " / ", maximum(kappa))
+#    println("rh has NaN: ", any(isnan, rh), " min/max: ", minimum(rh), " / ", maximum(rh))
 
     # === Compute dependent quantities ===
     latent_heat = calculate_latent_heat(tsurf) # should be with dimension W*m^-2
     rho_a = 1.225 # Density of air (TODO: make temperature dependent?)
 
-    println("latent_heat min/max: ", minimum(latent_heat), " / ", maximum(latent_heat))
+#    println("latent_heat min/max: ", minimum(latent_heat), " / ", maximum(latent_heat))
 
     # === Constants ===
     top_layer_depth = 0.3 # TODO: good value?
@@ -42,11 +36,11 @@ function solve_surface_temperature(
     Cs_top = Cs[:, :, 1]        # Select top layer (2D: nx × ny)
     base_term = (kappa_top ./ D2) .+ (Cs_top .* D2 ./ (2 * delta_t))
 
-    println("Shape of kappa_top: ", size(kappa_top))
-    println("Shape of Cs_top: ", size(Cs_top))
-    println("Shape of D1: ", size(D1))
-    println("Shape of D2: ", size(D2))
-    println("Shape of base_term: ", size(base_term))
+   # println("Shape of kappa_top: ", size(kappa_top))
+   # println("Shape of Cs_top: ", size(Cs_top))
+   # println("Shape of D1: ", size(D1))
+   # println("Shape of D2: ", size(D2))
+   # println("Shape of base_term: ", size(base_term))
 
     heat_transfer_term = base_term ./ (1 .+ (D1 ./ D2) .+ (Cs_top .* D1 .* D2 ./ (2 * delta_t .* kappa_top)))
     air_term = (rho_a .* c_p_air ./ rh[:, :, 1, 1]) .+ (rho_a .* c_p_air .* top_layer_depth ./ (2 * delta_t))  # Adjust rh to 2D
@@ -56,23 +50,23 @@ function solve_surface_temperature(
     nveg = size(albedo, 4)  # 22
     common_term_4d = repeat(common_term, outer=(1, 1, 1, nveg))  # (204, 180, 1, 22)
 
-
-    println("base_term min/max: ", minimum(base_term), " / ", maximum(base_term))
-    println("heat_transfer_term min/max: ", minimum(heat_transfer_term), " / ", maximum(heat_transfer_term))
-    println("air_term min/max: ", minimum(air_term), " / ", maximum(air_term))
-    println("common_term min/max: ", minimum(common_term), " / ", maximum(common_term))
+#
+    #println("base_term min/max: ", minimum(base_term), " / ", maximum(base_term))
+    #println("heat_transfer_term min/max: ", minimum(heat_transfer_term), " / ", maximum(heat_transfer_term))
+    #println("air_term min/max: ", minimum(air_term), " / ", maximum(air_term))
+    #println("common_term min/max: ", minimum(common_term), " / ", maximum(common_term))
 
     # === Define the residual function f(Ts_new) = lhs - rhs ===
     function f(Ts_new, Ts_old)
         # Debug shapes
-        println("Shape of Ts_new: ", size(Ts_new))
-        println("Shape of Ts_old: ", size(Ts_old))
-        println("Shape of albedo: ", size(albedo))
-        println("Shape of rh: ", size(rh))
-        println("Shape of E_n: ", size(E_n))
+ #       println("Shape of Ts_new: ", size(Ts_new))
+     #   println("Shape of Ts_old: ", size(Ts_old))
+     #   println("Shape of albedo: ", size(albedo))
+     #   println("Shape of rh: ", size(rh))
+     #   println("Shape of E_n: ", size(E_n))
 
         lhs = emissivity .* sigma .* Ts_new.^4 .+ common_term_4d .* Ts_new
-        println("Shape of lhs: ", size(lhs))
+      #  println("Shape of lhs: ", size(lhs))
 
         rhs = (1 .- albedo) .* repeat(Rs, outer=(1, 1, 1, nveg)) .+ 
               emissivity .* repeat(RL, outer=(1, 1, 1, nveg)) .+
@@ -92,7 +86,7 @@ function solve_surface_temperature(
         #      ((kappa_top .* T2 ./ D2) .+ (Cs_top .* D2 .* T1 ./ (2 * delta_t))) ./ 
         #      (1 .+ (D1 / D2) .+ (Cs_top .* D1 .* D2 ./ (2 * delta_t .* kappa_top)))
 
-        println("Shape of rhs: ", size(rhs))
+    #    println("Shape of rhs: ", size(rhs))
 
         return lhs .- rhs
     end

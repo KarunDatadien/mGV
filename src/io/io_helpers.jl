@@ -55,3 +55,16 @@ function reshape_static_inputs!()
         println("rarc_gpu already has ", ndims(rarc_gpu), " dimensions; no reshape needed.")
     end
 end
+
+# Helper function to sum over a dimension with NaN handling
+function sum_with_nan_handling(arr::CuArray, dim::Int)
+    # Replace NaNs with zero for summation
+    arr_no_nan = ifelse.(isnan.(arr), 0.0, arr)
+    # Compute sum over specified dimension
+    sum_non_nan = dropdims(sum(arr_no_nan, dims=dim), dims=dim)
+    # Count non-NaN elements; if zero, all were NaN
+    count_non_nan = dropdims(sum(.!isnan.(arr), dims=dim), dims=dim)
+    # Replace sum with NaN where all elements were NaN
+    summed = ifelse.(count_non_nan .== 0, NaN, sum_non_nan)
+    return summed
+end

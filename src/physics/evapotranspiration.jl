@@ -62,25 +62,25 @@ end
 function calculate_potential_evaporation(tair_gpu, vp_gpu, elev_gpu, net_radiation, aerodynamic_resistance, rarc_gpu)
     # Compute intermediate variables
     vpd           = calculate_vpd(tair_gpu, vp_gpu) # [Pa]
-    println("vpd[50,10] = ", Array(vpd)[50, 10])
+  #  println("vpd[50,10] = ", Array(vpd)[50, 10])
 
     slope         = calculate_svp_slope(tair_gpu) # [Pa/°C]
-    println("slope[50,10] = ", Array(slope)[50, 10])
+   # println("slope[50,10] = ", Array(slope)[50, 10])
 
     latent_heat   = calculate_latent_heat(tair_gpu) # [J/kg]
-    println("latent_heat[50,10] = ", Array(latent_heat)[50, 10])
+  #  println("latent_heat[50,10] = ", Array(latent_heat)[50, 10])
 
     scale_height  = calculate_scale_height(tair_gpu, elev_gpu) # [m] 
-    println("scale_height[50,10] = ", Array(scale_height)[50, 10])
+ #   println("scale_height[50,10] = ", Array(scale_height)[50, 10])
 
     surface_pressure = p_std .* exp.(-elev_gpu ./ scale_height) # [Pa]
-    println("surface_pressure[50,10] = ", Array(surface_pressure)[50, 10])
+ #  println("surface_pressure[50,10] = ", Array(surface_pressure)[50, 10])
 
     psychrometric_constant = 1628.6 .* surface_pressure ./ latent_heat # [Pa/K]
-    println("psychrometric_constant[50,10] = ", Array(psychrometric_constant)[50, 10])
+ #   println("psychrometric_constant[50,10] = ", Array(psychrometric_constant)[50, 10])
 
     air_density = 0.003486 .* surface_pressure ./ (273.15 .+ tair_gpu) # [kg/m^3]
-    println("air_density[50,10] = ", Array(air_density)[50, 10])
+ #   println("air_density[50,10] = ", Array(air_density)[50, 10])
 
 
     # Penman-Monteith equation (mm/day) with canopy resistance set to zero
@@ -125,10 +125,10 @@ function calculate_transpiration(
     water_storage::CuArray, max_water_storage::CuArray, soil_moisture_old::CuArray, soil_moisture_critical::CuArray, 
     wilting_point::CuArray, root_gpu::CuArray
 )
-    println("soil_moisture_old shape: ", size(soil_moisture_old))
-    println("soil_moisture_critical shape: ", size(soil_moisture_critical))
-    println("wilting_point shape: ", size(wilting_point))
-    println("root_gpu shape: ", size(root_gpu))
+#    println("soil_moisture_old shape: ", size(soil_moisture_old))
+#    println("soil_moisture_critical shape: ", size(soil_moisture_critical))
+#    println("wilting_point shape: ", size(wilting_point))
+#    println("root_gpu shape: ", size(root_gpu))
 
     # Compute stress factor
     #gsm_inv = calculate_gsm_inv(soil_moisture_old, soil_moisture_critical, wilting_point)
