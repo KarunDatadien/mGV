@@ -68,6 +68,8 @@ soil_temperature[:, :, 3:3] .= Tavg_gpu
 bulk_dens_min, soil_dens_min, porosity, soil_moisture_max, soil_moisture_critical, field_capacity, wilting_point = 
     calculate_soil_properties(bulk_dens_gpu, soil_dens_gpu, depth_gpu, Wcr_gpu, Wfc_gpu, Wpwp_gpu)
 
+host_buf = CUDA.pin(Array{eltype(soil_temperature)}(undef, size(soil_temperature)...))
+
 function process_year(year)
     global water_storage  # Ensure we're modifying the global variables
     global throughfall  
@@ -224,40 +226,40 @@ function process_year(year)
                 ### Variables without fill-value replacement ###
             
                 # Surface temperature
-                @timeit to "STRAIGHT tsurf_output" @async tsurf_output[:, :, day, :] = Array(tsurf_n)
+                @timeit to "STRAIGHT tsurf_output" tsurf_output[:, :, day, :] = Array(tsurf_n)
 
-                @timeit to "SUM outputs" @async tsurf_summed_output[:, :, day] = Array(sum_with_nan_handling(tsurf_n, 4))
+                @timeit to "SUM outputs" tsurf_summed_output[:, :, day] = Array(sum_with_nan_handling(tsurf_n, 4))
             
                 # Potential evaporation
-                @timeit to "STRAIGHT potential_evaporation_output" @async potential_evaporation_output[:, :, day, :] = Array(potential_evaporation)
-                @timeit to "SUM outputs" @async potential_evaporation_summed_output[:, :, day] = Array(sum_with_nan_handling(potential_evaporation, 4))
+                @timeit to "STRAIGHT potential_evaporation_output" potential_evaporation_output[:, :, day, :] = Array(potential_evaporation)
+                @timeit to "SUM outputs" potential_evaporation_summed_output[:, :, day] = Array(sum_with_nan_handling(potential_evaporation, 4))
             
                 # Aerodynamic resistance
-                @timeit to "STRAIGHT aerodynamic_resistance_output" @async aerodynamic_resistance_output[:, :, day, :] = Array(aerodynamic_resistance)
+                @timeit to "STRAIGHT aerodynamic_resistance_output" aerodynamic_resistance_output[:, :, day, :] = Array(aerodynamic_resistance)
             
                 # Transpiration
-                @timeit to "STRAIGHT transpiration_output" @async transpiration_output[:, :, day, :] = Array(transpiration)
+                @timeit to "STRAIGHT transpiration_output" transpiration_output[:, :, day, :] = Array(transpiration)
             
                 # Air temperature
-                @timeit to "STRAIGHT tair_output" @async tair_output[:, :, day] = Array(tair_gpu)
+                @timeit to "STRAIGHT tair_output" tair_output[:, :, day] = Array(tair_gpu)
             
                 # Water storage
-                @timeit to "STRAIGHT water_storage_output" @async water_storage_output[:, :, day, :] = Array(water_storage)
+                @timeit to "STRAIGHT water_storage_output" water_storage_output[:, :, day, :] = Array(water_storage)
             
                 # Precipitation
-                @timeit to "STRAIGHT prec_scaled_output" @async prec_scaled[:, :, day] = Array(prec_gpu)
+                @timeit to "STRAIGHT prec_scaled_output" prec_scaled[:, :, day] = Array(prec_gpu)
             
                 # Q12
-                @timeit to "STRAIGHT Q12_output" @async Q12_output[:, :, day] = Array(Q_12)
+                @timeit to "STRAIGHT Q12_output" Q12_output[:, :, day] = Array(Q_12)
             
                 # Soil evaporation
-                @timeit to "STRAIGHT soil_evaporation_output" @async soil_evaporation_output[:, :, day, :] = Array(soil_evaporation)
+                @timeit to "STRAIGHT soil_evaporation_output" soil_evaporation_output[:, :, day, :] = Array(soil_evaporation)
             
                 # Soil temperature
-                @timeit to "STRAIGHT soil_temperature_output" @async soil_temperature_output[:, :, day, :] = Array(soil_temperature)
+                @timeit to "STRAIGHT soil_temperature_output" soil_temperature_output[:, :, day, :] = Array(soil_temperature)
 
                 # Soil moisture
-                @timeit to "STRAIGHT soil_moisture_output" @async soil_moisture_output[:, :, day, :] = Array(soil_moisture_old)
+                @timeit to "STRAIGHT soil_moisture_output" soil_moisture_output[:, :, day, :] = Array(soil_moisture_old)
             
                 ### Variables with fill-value value replacement ###
             
