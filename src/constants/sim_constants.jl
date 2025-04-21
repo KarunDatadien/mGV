@@ -1,9 +1,9 @@
 module SimConstants
-    export N_veg, K_L, K, z2, Ri_cr, emissivity,
+    export nveg, K_L, K, z2, Ri_cr, emissivity,
            Ki, Kw, Kdry_org, Ks_org, 
            organic_frac, bulk_dens_org, soil_dens_org
 
-    const N_veg = 20
+    const nveg = 22
     const K_L = 0.2 # As used by Dickinson (1984) [mm]
     const K = 0.4
     const z2 = 10

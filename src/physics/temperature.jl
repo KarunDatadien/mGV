@@ -47,7 +47,6 @@ function solve_surface_temperature(
     common_term = heat_transfer_term .+ air_term
 
     # Extend common_term to 4D for nveg
-    nveg = size(albedo, 4)  # 22
     common_term_4d = repeat(common_term, outer=(1, 1, 1, nveg))  # (204, 180, 1, 22)
 
 #
