@@ -10,6 +10,7 @@ println("Loading parameter data and allocating memory...")
     (albedo_cpu,     albedo_gpu)     = read_and_allocate_parameter(albedo_var) 
     (rmin_cpu,       rmin_gpu)       = read_and_allocate_parameter(rmin_var) 
     (rarc_cpu,       rarc_gpu)       = read_and_allocate_parameter(rarc_var) 
+    (cv_cpu,         cv_gpu)       = read_and_allocate_parameter(cv_var) 
     (elev_cpu,       elev_gpu)       = read_and_allocate_parameter(elev_var) 
     (ksat_cpu,       ksat_gpu)       = read_and_allocate_parameter(ksat_var) 
     (residmoist_cpu, residmoist_gpu) = read_and_allocate_parameter(residmoist_var) 
@@ -33,11 +34,11 @@ println("Loading parameter data and allocating memory...")
 end
 
 println("Loading gpu_load_static_inputs...")
-gpu_load_static_inputs([rmin_cpu, rarc_cpu, elev_cpu, ksat_cpu, residmoist_cpu, init_moist_cpu, root_cpu,
+gpu_load_static_inputs([rmin_cpu, rarc_cpu, cv_cpu, elev_cpu, ksat_cpu, residmoist_cpu, init_moist_cpu, root_cpu,
                         Wcr_cpu, Wfc_cpu, Wpwp_cpu, depth_cpu, quartz_cpu,
                         bulk_dens_cpu, soil_dens_cpu, expt_cpu, b_infilt_cpu,
                         Ds_cpu, Dsmax_cpu, Ws_cpu, dp_cpu, Tavg_cpu],
-                       [rmin_gpu, rarc_gpu, elev_gpu, ksat_gpu, residmoist_gpu, init_moist_gpu, root_gpu,
+                       [rmin_gpu, rarc_gpu, cv_gpu, elev_gpu, ksat_gpu, residmoist_gpu, init_moist_gpu, root_gpu,
                         Wcr_gpu, Wfc_gpu, Wpwp_gpu, depth_gpu, quartz_gpu,
                         bulk_dens_gpu, soil_dens_gpu, expt_gpu, b_infilt_gpu,
                         Ds_gpu, Dsmax_gpu, Ws_gpu, dp_gpu, Tavg_gpu])
@@ -45,7 +46,7 @@ gpu_load_static_inputs([rmin_cpu, rarc_cpu, elev_cpu, ksat_cpu, residmoist_cpu, 
 reshape_static_inputs!()
 
 # === Initial States ===
-global water_storage = CUDA.fill(Float32(0.1), size(coverage_gpu))  # Fill with 0.1 on GPU
+global water_storage = CUDA.fill(Float32(0.0), size(coverage_gpu))  # Fill with 0.1 on GPU
 global throughfall   = CUDA.zeros(Float32, size(coverage_gpu))      # Allocate zeros on GPU
 global bulk_dens_min = CUDA.zeros(Float32, size(bulk_dens_gpu))
 global soil_dens_min = CUDA.zeros(Float32, size(bulk_dens_gpu))
@@ -87,12 +88,13 @@ function process_year(year)
     println("Opening output file...")
     output_file = joinpath(output_dir, "$(output_file_prefix)$(year).nc")
     
-    @time out_ds, precipitation_output, water_storage_output, Q12_output,
-          tair_output, tsurf_output, tsurf_summed_output, canopy_evaporation_output,
-          canopy_evaporation_summed_output, transpiration_output, aerodynamic_resistance_output,
+    @time out_ds, precipitation_output, water_storage_output, water_storage_summed_output, Q12_output,
+          tair_output, tsurf_output, canopy_evaporation_output, canopy_evaporation_summed_output, 
+          transpiration_output, transpiration_summed_output, aerodynamic_resistance_output, aerodynamic_resistance_summed_output,
           potential_evaporation_output, potential_evaporation_summed_output, net_radiation_output,
           net_radiation_summed_output, max_water_storage_output, max_water_storage_summed_output,
-          soil_evaporation_output, soil_temperature_output, soil_moisture_output =
+          soil_evaporation_output, soil_temperature_output, soil_moisture_output, total_et_output, total_runoff_output, 
+          kappa_array_output, cs_array_output =
           create_output_netcdf(output_file, prec_cpu, LAI_cpu)
 
     println("Running...") 
@@ -114,10 +116,11 @@ function process_year(year)
                                   [prec_cpu, tair_cpu, wind_cpu, vp_cpu, swdown_cpu, lwdown_cpu], 
                                   [prec_gpu, tair_gpu, wind_gpu, vp_gpu, swdown_gpu, lwdown_gpu])
                                   
+                                
             # For the first timestep we set tsurf = tair (see page 14,421 of Liang et al. (1994)):
             if day == 1 && year == start_year 
-                tsurf = tair_gpu  # Set tsurf = tair_gpu on first timestep
-                tsurf_n = repeat(tsurf, outer=(1, 1, 1, nveg))  # (204, 180, 1, 22)
+                tsurf = tair_gpu 
+             #   tsurf_n = repeat(tsurf, outer=(1, 1, 1, nveg))  # (204, 180, 1, 22)
             end
 
             @timeit to "compute_aerodynamic_resistance" aerodynamic_resistance = compute_aerodynamic_resistance(
@@ -141,97 +144,143 @@ function process_year(year)
 
             soil_moisture_old = soil_moisture_new
 
+#            @timeit to "calculate_transpiration" transpiration, E_1_t, E_2_t = calculate_transpiration(
+#                potential_evaporation, aerodynamic_resistance, rarc_gpu, 
+#                water_storage, max_water_storage, soil_moisture_old, soil_moisture_critical, wilting_point, 
+#                root_gpu, rmin_gpu, LAI_gpu
+#            ) # Eq. (5), 🚧 TODO: add the gsm_inv multiplication
+
             @timeit to "calculate_transpiration" transpiration = calculate_transpiration(
                 potential_evaporation, aerodynamic_resistance, rarc_gpu, 
                 water_storage, max_water_storage, soil_moisture_old, soil_moisture_critical, wilting_point, 
                 root_gpu
             ) # Eq. (5), 🚧 TODO: add the gsm_inv multiplication
+
             
             @timeit to "calculate_soil_evaporation" soil_evaporation = calculate_soil_evaporation(soil_moisture_old, soil_moisture_max, potential_evaporation, b_infilt_gpu)
             
             # === Update Water Storage with Throughfall Computation; Eq. 16 ===
-            @timeit to "update_water_canopy_storage" begin 
-            new_water_storage = water_storage .+ (prec_gpu .- canopy_evaporation) 
-            throughfall = max.(0, new_water_storage .- max_water_storage)
-            water_storage = max.(0.0, min.(new_water_storage, max_water_storage)) # works ✅
-            end
+            @timeit to "update_water_canopy_storage" (water_storage, throughfall) = update_water_canopy_storage(
+                water_storage, prec_gpu, canopy_evaporation, max_water_storage, throughfall
+            )
 
             # Direct surface runoff
-            @timeit to "calculate_surface_runoff" surface_runoff = calculate_surface_runoff(prec_gpu, soil_moisture_old, soil_moisture_max, b_infilt_gpu) # Eq. (18a) and (18b)
+            @timeit to "calculate_surface_runoff" surface_runoff = calculate_surface_runoff(
+              #  prec_gpu, throughfall, soil_moisture_old, soil_moisture_max, b_infilt_gpu
+                prec_gpu, soil_moisture_old, soil_moisture_max, b_infilt_gpu
+                ) # Eq. (18a) and (18b)
 
             # Drainage from layer 1 to 2; Q12
             @timeit to "calculate_drainage_Q12" Q_12 = calculate_drainage_Q12(soil_moisture_old, soil_moisture_max, ksat_gpu, residmoist_gpu, porosity) # Eq. (20) TODO: check if porosity is the correct argument here?
 
             # Water balance toplayer update 
-            @timeit to "update_topsoil_moisture" soil_moisture_new = update_topsoil_moisture(prec_gpu, soil_moisture_old, soil_moisture_max, surface_runoff, Q_12, soil_evaporation, depth_gpu)
+            @timeit to "update_topsoil_moisture" soil_moisture_new = update_topsoil_moisture(
+     #           prec_gpu, throughfall, soil_moisture_old, soil_moisture_max, surface_runoff, Q_12, soil_evaporation, depth_gpu, E_1_t
+            prec_gpu, soil_moisture_old, soil_moisture_max, surface_runoff, Q_12, soil_evaporation, depth_gpu
+       
+            )
 
             # Calculate subsurface runoff
             @timeit to "calculate_subsurface_runoff" subsurface_runoff = calculate_subsurface_runoff(soil_moisture_old, soil_moisture_max, Ds_gpu, Dsmax_gpu, Ws_gpu) # Eq. (21)           
 
             # Update bottom soil moisture and get total subsurface runoff
             @timeit to "update_bottomsoil_moisture" soil_moisture_new[:, :, 3:3], subsurface_runoff_total = update_bottomsoil_moisture(
-                soil_moisture_old, soil_moisture_max, subsurface_runoff, Q_12
+#                soil_moisture_old, soil_moisture_max, subsurface_runoff, Q_12, E_2_t
+soil_moisture_old, soil_moisture_max, subsurface_runoff, Q_12
             ) # Eq. (22), TODO: compare this with the paper
 
-            # TODO: implement section 2.5
-            
-            @timeit to "E_n sum"                 E_n              = canopy_evaporation .+ transpiration  # + soil_evaporation
+            # Section 2.5
+            @timeit to "compute_total_fluxes" begin
+                total_et = calculate_total_evapotranspiration(canopy_evaporation, transpiration, soil_evaporation, cv_gpu)
+                total_runoff = calculate_total_runoff(surface_runoff, subsurface_runoff, cv_gpu)
+            end          
+
             @timeit to "Set ice_frac sum"        ice_frac         = 0.0
+
             @timeit to "soil_conductivity"       kappa_array      = soil_conductivity(
                                                                    soil_moisture_new, ice_frac, soil_dens_min,
                                                                    bulk_dens_min, quartz_gpu, organic_frac, porosity)
-            @timeit to "volumetric_heat_capacity" Cs_array        = volumetric_heat_capacity(
+            @timeit to "volumetric_heat_capacity" cs_array        = volumetric_heat_capacity(
                                                                    bulk_dens_gpu ./ soil_dens_gpu,
-                                                                   soil_moisture_new, ice_frac, organic_frac)
+                                                                   soil_moisture_new ./ rho_w, ice_frac, organic_frac)
             @timeit to "estimate_layer_temperature" soil_temperature = estimate_layer_temperature(
                                                                    depth_gpu, dp_gpu, tsurf, soil_temperature, Tavg_gpu)
             
+            if day == 1 && year == start_year 
+                @timeit to "solve_surface_temperature" tsurf = solve_surface_temperature(
+                    tsurf,          # Surface temperature (CuArray)
+                    soil_temperature,    # Soil layer 1 temperature (CuArray) 
+                    albedo_gpu,        # Surface albedo (CuArray)
+                    swdown_gpu,   # Rs: shortwave radiation (Float32)
+                    lwdown_gpu,   # RL: longwave radiation (Float32)
+                    sum_with_nan_handling(aerodynamic_resistance, 4), # Aerodynamic resistance (CuArray)
+                    kappa_array,         # Thermal conductivity (CuArray)
+                    depth_gpu,             # D1 (layer 1 depth in meters) TODO: should be sum of 1 and 2
+                    day_sec,               # TODO: should be day_sec ? (time step in seconds -> 1 day in s)
+                    cs_array,
+                    total_et
+                ) # TODO: issue: somehow changes canopy_evaporation and others from shape: (204, 180, 1, 22) to (204, 180, 3, 22)
 
-            #@timeit to "solve_surface_temperature" tsurf_n = solve_surface_temperature(
-            #    tsurf_n,          # Surface temperature (CuArray)
-            #    soil_temperature[:,:,1],    # Soil layer 1 temperature (CuArray) TODO: should be sum of 1 and 2
-            #    soil_temperature[:,:,2],    # Soil layer 2 temperature (CuArray) TODO: should be layer 3 (bottom)
-            #    albedo_gpu,        # Surface albedo (CuArray)
-            #    swdown_gpu,   # Rs: shortwave radiation (Float32)
-            #    lwdown_gpu,   # RL: longwave radiation (Float32)
-            #    aerodynamic_resistance, # Aerodynamic resistance (CuArray)
-            #    kappa_array,         # Thermal conductivity (CuArray)
-            #    depth_gpu[:,:,1],             # D1 (layer 1 depth in meters) TODO: should be sum of 1 and 2
-            #    depth_gpu[:,:,2],             # D2 (layer 2 depth in meters) TODO: should be layer 3 (bottom)
-            #    day_sec,               # delta_t (time step in seconds -> 1 day in s)
-            #    Cs_array,
-            #    E_n
-            #) # TODO: issue: somehow changes canopy_evaporation and others from shape: (204, 180, 1, 22) to (204, 180, 3, 22)
+                @timeit to "compute_aerodynamic_resistance" aerodynamic_resistance = compute_aerodynamic_resistance(
+                    z2, d0_gpu, z0_gpu, K, tsurf, tair_gpu, wind_gpu
+                ) # Eq. (3). 🚧 TODO: check once solve_surface_temperature function has been checked    
 
-            # Convert tsurf_n to Float64
-            tsurf_n = convert(CuArray{Float64, 4}, tsurf_n) # TODO: do this in a more sensible way, somewhere else
+            end
+
+            @timeit to "solve_surface_temperature" tsurf = solve_surface_temperature(
+                tsurf,          # Surface temperature (CuArray)
+                soil_temperature,    # Soil layer 1 temperature (CuArray) 
+                albedo_gpu,        # Surface albedo (CuArray)
+                swdown_gpu,   # Rs: shortwave radiation (Float32)
+                lwdown_gpu,   # RL: longwave radiation (Float32)
+                sum_with_nan_handling(aerodynamic_resistance, 4), # Aerodynamic resistance (CuArray)
+                kappa_array,         # Thermal conductivity (CuArray)
+                depth_gpu,             # D1 (layer 1 depth in meters) TODO: should be sum of 1 and 2
+                day_sec,               # TODO: should be day_sec ? (time step in seconds -> 1 day in s)
+                cs_array,
+                total_et
+            ) # TODO: issue: somehow changes canopy_evaporation and others from shape: (204, 180, 1, 22) to (204, 180, 3, 22)
+
+
+
 
             @timeit to "outputs" begin
                 ### Variables without fill-value replacement ###
-                @timeit to "tsurf_output"                      tsurf_output[:, :, day, :]                = Array(tsurf_n)
-                @timeit to "tsurf_summed_output"               tsurf_summed_output[:, :, day]            = Array(sum_with_nan_handling(tsurf_n, 4))
+                @timeit to "tsurf_output"                      tsurf_output[:, :, day]                = Array(tsurf)
+              #  @timeit to "tsurf_summed_output"               tsurf_summed_output[:, :, day]            = Array(sum_with_nan_handling(tsurf, 4))
                 @timeit to "potential_evaporation_output"      potential_evaporation_output[:, :, day, :] = Array(potential_evaporation)
-                @timeit to "potential_evaporation_summed"      potential_evaporation_summed_output[:, :, day] = Array(sum_with_nan_handling(potential_evaporation, 4))
+                @timeit to "potential_evaporation_summed_output"      potential_evaporation_summed_output[:, :, day] = Array(sum_with_nan_handling(cv_gpu .* potential_evaporation, 4))
                 @timeit to "aerodynamic_resistance_output"     aerodynamic_resistance_output[:, :, day, :] = Array(aerodynamic_resistance)
+                @timeit to "aerodynamic_resistance_summed_output"     aerodynamic_resistance_summed_output[:, :, day] = Array(sum_with_nan_handling(aerodynamic_resistance, 4))
+
                 @timeit to "transpiration_output"              transpiration_output[:, :, day, :]        = Array(transpiration)
+                @timeit to "transpiration_summed_output"       transpiration_summed_output[:, :, day]    = Array(sum_with_nan_handling(cv_gpu .* transpiration, 4))
+
                 @timeit to "tair_output"                       tair_output[:, :, day]                    = Array(tair_gpu)
-                @timeit to "water_storage_output"              water_storage_output[:, :, day, :]        = Array(water_storage)
                 @timeit to "precipitation_output"              precipitation_output[:, :, day]           = Array(prec_gpu)
                 @timeit to "Q12_output"                        Q12_output[:, :, day]                     = Array(Q_12)
                 @timeit to "soil_evaporation_output"           soil_evaporation_output[:, :, day, :]     = Array(soil_evaporation)
                 @timeit to "soil_temperature_output"           soil_temperature_output[:, :, day, :]     = Array(soil_temperature)
                 @timeit to "soil_moisture_output"              soil_moisture_output[:, :, day, :]        = Array(soil_moisture_old)
-            
-                ### Variables with fill-value replacement ###
-                @timeit to "net_radiation_processed"           net_radiation_processed = ifelse.(abs.(net_radiation) .> 1e25, NaN, net_radiation)
+                @timeit to "total_et_output"                   total_et_output[:, :, day]                = Array(total_et)
+                @timeit to "total_runoff_output"               total_runoff_output[:, :, day]            = Array(total_runoff)
+                @timeit to "kappa_array_output"                kappa_array_output[:, :, day,:]           = Array(kappa_array)
+                @timeit to "cs_array_output"                   cs_array_output[:, :, day,:]              = Array(cs_array)
+
+                ### Variables with fill-value replacement ###                
+                @timeit to "water_storage_processed"           water_storage_processed = ifelse.(abs.(water_storage) .> 1e30, NaN, water_storage)
+                @timeit to "water_storage_output"              water_storage_output[:, :, day, :]        = Array(water_storage_processed)
+                @timeit to "water_storage_summed_output"       water_storage_summed_output[:, :, day]    = Array(sum_with_nan_handling(water_storage_processed, 4))
+
+                @timeit to "net_radiation_processed"           net_radiation_processed = ifelse.(abs.(net_radiation) .> 1e30, NaN, net_radiation)
                 @timeit to "net_radiation_output"              net_radiation_output[:, :, day, :]        = Array(net_radiation_processed)
                 @timeit to "net_radiation_summed_output"       net_radiation_summed_output[:, :, day]    = Array(sum_with_nan_handling(net_radiation_processed, 4))
             
-                @timeit to "canopy_evaporation_processed"      canopy_evaporation_processed = ifelse.(abs.(canopy_evaporation) .> 1e25, NaN, canopy_evaporation)
+                @timeit to "canopy_evaporation_processed"      canopy_evaporation_processed = ifelse.(abs.(canopy_evaporation) .> 1e30, NaN, canopy_evaporation)
                 @timeit to "canopy_evaporation_output"         canopy_evaporation_output[:, :, day, :]   = Array(canopy_evaporation_processed)
                 @timeit to "canopy_evaporation_summed_output"  canopy_evaporation_summed_output[:, :, day] = Array(sum_with_nan_handling(canopy_evaporation_processed, 4))
             
-                @timeit to "max_water_storage_processed"       max_water_storage_processed = ifelse.(abs.(max_water_storage) .> 1e25, NaN, max_water_storage)
+                @timeit to "max_water_storage_processed"       max_water_storage_processed = ifelse.(abs.(max_water_storage) .> 1e30, NaN, max_water_storage)
                 @timeit to "max_water_storage_output"          max_water_storage_output[:, :, day, :]    = Array(max_water_storage_processed)
                 @timeit to "max_water_storage_summed_output"   max_water_storage_summed_output[:, :, day] = Array(sum_with_nan_handling(max_water_storage_processed, 4))
             end
