@@ -1,8 +1,12 @@
 module PhysicalConstants
-    export svp_a, svp_b, svp_c, pa_per_kpa, 
+    export rho_a, rho_w, svp_a, svp_b, svp_c, pa_per_kpa, 
            k_b, n_a, r_gas, mw_air, r_air, 
            t_freeze, lapse_rate, lat_vap, g, sigma, 
            p_std, c_p_air, day_sec, mm_in_m
+
+    # Air and water density Constants      
+    const rho_a = 1.225 # Density of air (TODO: make temperature dependent?)
+    const rho_w = 1000.0  # Density of liquid water (TODO: make temperature dependent?)
 
     # Saturation Vapor Pressure Constants
     const svp_a = 0.61078 # Empirical coefficient; gives SVP at 0 °C (kPa)
