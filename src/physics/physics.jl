@@ -19,6 +19,23 @@ function calculate_scale_height(tair_gpu, elev)
 end
 
 # Latent Heat of Vaporization
-function calculate_latent_heat(temp)
-    return lat_vap .- 2361.0 .* temp # [J/kg]
+#function calculate_latent_heat(temp)
+#    return lat_vap .- 2361.0 .* temp # [J/kg]
+#end
+
+# Watson correlation
+function calculate_latent_heat(T)
+    # Parameters for water
+    Hvap_Tb = 2.26e6  # Latent heat at boiling point (J/kg)
+    Tb = 373.15       # Boiling point (K)
+    Tc = 647.096      # Critical temperature (K)
+    n = 0.38          # Watson exponent
+
+    # Compute element-wise ratio
+    ratio = (Tc .- T) ./ (Tc - Tb)
+    ratio = clamp.(ratio, 1e-6, 1.0)  # Prevent unphysical values
+    Hvap = Hvap_Tb .* (ratio .^ n)
+
+    # Ensure latent heat is positive, element-wise
+    return max.(Hvap, 1e3)  # Minimum 1000 J/kg for numerical stability
 end
