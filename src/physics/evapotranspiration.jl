@@ -61,7 +61,7 @@ end
 
 function calculate_potential_evaporation(tair_gpu, vp_gpu, elev_gpu, net_radiation, aerodynamic_resistance, rarc_gpu)
     # Compute intermediate variables
-    vpd           = calculate_vpd(tair_gpu, vp_gpu) # [Pa]
+    vpd           = max.(calculate_vpd(tair_gpu, vp_gpu), 0.0)  # [Pa], ensure non-negative
   #  println("vpd[50,10] = ", Array(vpd)[50, 10])
 
     slope         = calculate_svp_slope(tair_gpu) # [Pa/°C]
@@ -80,18 +80,16 @@ function calculate_potential_evaporation(tair_gpu, vp_gpu, elev_gpu, net_radiati
  #   println("psychrometric_constant[50,10] = ", Array(psychrometric_constant)[50, 10])
 
     air_density = 0.003486 .* surface_pressure ./ (273.15 .+ tair_gpu) # [kg/m^3]
- #   println("air_density[50,10] = ", Array(air_density)[50, 10])
+    println("air_density[50,10] = ", Array(air_density)[50, 10])
 
 
     # Penman-Monteith equation (mm/day) with canopy resistance set to zero
-    numerator = slope .* (net_radiation .* day_sec) .+ (air_density .* c_p_air .* vpd ./ aerodynamic_resistance)
+    numerator = slope .* (net_radiation .* day_sec) .+ (air_density .* c_p_air .* vpd .* day_sec ./ aerodynamic_resistance)
     denominator = latent_heat .* (slope .+ psychrometric_constant .* (1 .+ (rarc_gpu) ./ aerodynamic_resistance))
     potential_evaporation = (numerator ./ denominator)  # kg/m^2/day = [mm/day]
 
-    # Ensure evaporation is non-negative when vapor pressure deficit is positive
-    potential_evaporation = ifelse.((vpd .>= 0.0) .& (potential_evaporation .< 0.0),
-                                    0.0,
-                                    potential_evaporation)
+    # Ensure potential evaporation is non-negative
+    potential_evaporation = max.(potential_evaporation, 0.0)
     
     return potential_evaporation # [mm/day]
 end
@@ -106,6 +104,12 @@ end
 
 function calculate_canopy_evaporation(water_storage, max_water_storage, potential_evaporation, aerodynamic_resistance, rarc, prec_gpu)
 
+    potential_evaporation .= ifelse.(isnan.(potential_evaporation) .| (potential_evaporation .> 1e30), 0.0, potential_evaporation)
+    water_storage .= ifelse.(isnan.(water_storage) .| (water_storage .> 1e30), 0.0, water_storage)
+    max_water_storage .= ifelse.(isnan.(max_water_storage) .| (max_water_storage .> 1e30), 0.0, max_water_storage)
+    aerodynamic_resistance .= ifelse.(isnan.(aerodynamic_resistance) .| (aerodynamic_resistance .> 1e30), 0.0, aerodynamic_resistance)
+    rarc .= ifelse.(isnan.(rarc) .| (rarc .> 1e30), 0.0, rarc)
+
     # Compute potential canopy evaporation
     canopy_evaporation_star = (water_storage ./ max_water_storage).^(2 / 3) .* potential_evaporation .* 
                               (aerodynamic_resistance ./ (aerodynamic_resistance .+ rarc))
@@ -115,6 +119,7 @@ function calculate_canopy_evaporation(water_storage, max_water_storage, potentia
 
     # Compute actual canopy evaporation
     canopy_evaporation = f_n .* canopy_evaporation_star
+    canopy_evaporation = ifelse.(isnan.(canopy_evaporation) .| (canopy_evaporation .> 1e30), 0.0, canopy_evaporation)
 
     return canopy_evaporation
 end
@@ -154,8 +159,83 @@ function calculate_transpiration(
     return transpiration
 end
 
+#function calculate_transpiration(
+#    potential_evaporation::CuArray, aerodynamic_resistance::CuArray, rarc_gpu::CuArray,  
+#    water_storage::CuArray, max_water_storage::CuArray, soil_moisture_old::CuArray, 
+#    soil_moisture_critical::CuArray, wilting_point::CuArray, root_gpu::CuArray, 
+#    rmin_gpu::CuArray, LAI_gpu::CuArray
+#)
+#    # Replace NaN or large values with 0.0
+#    potential_evaporation .= ifelse.(isnan.(potential_evaporation) .| (potential_evaporation .> 1e30), 0.0, potential_evaporation)
+#    water_storage .= ifelse.(isnan.(water_storage) .| (water_storage .> 1e30), 0.0, water_storage)
+#    max_water_storage .= ifelse.(isnan.(max_water_storage) .| (max_water_storage .> 1e30), 0.0, max_water_storage)
+#    aerodynamic_resistance .= ifelse.(isnan.(aerodynamic_resistance) .| (aerodynamic_resistance .> 1e30), 0.0, aerodynamic_resistance)
+#    rarc_gpu .= ifelse.(isnan.(rarc_gpu) .| (rarc_gpu .> 1e30), 0.0, rarc_gpu)
+#
+#    # Compute soil moisture for layers 1 and 2 (sum of sub-layers for layer 1)
+#    W_1 = sum(soil_moisture_old[:, :, 1:2, :], dims=3)  # Layer 1: sum of sub-layers 1 and 2
+#    W_2 = soil_moisture_old[:, :, 3:3, :]  # Layer 2: third sub-layer
+#
+#    # Extract critical and wilting point values for layers 1 and 2
+#    W_1_cr = sum(soil_moisture_critical[:, :, 1:2, :], dims=3)
+#    W_2_cr = soil_moisture_critical[:, :, 3:3, :]
+#    W_1_star = sum(wilting_point[:, :, 1:2, :], dims=3)
+#    W_2_star = wilting_point[:, :, 3:3, :]
+#
+#    # Compute soil moisture stress factor g_sw^{-1} for each layer (Eq. 7)
+#    g_sw_inv_1 = ifelse.(W_1 .>= W_1_cr, 1.0,
+#                        ifelse.(W_1 .< W_1_star, 0.0,
+#                                (W_1 .- W_1_star) ./ (W_1_cr .- W_1_star)))
+#    g_sw_inv_2 = ifelse.(W_2 .>= W_2_cr, 1.0,
+#                        ifelse.(W_2 .< W_2_star, 0.0,
+#                                (W_2 .- W_2_star) ./ (W_2_cr .- W_2_star)))
+#
+#    # Invert to get g_sw
+#    g_sw_1 = 1.0 ./ max.(g_sw_inv_1, 1e-6)  # Avoid division by zero
+#    g_sw_2 = 1.0 ./ max.(g_sw_inv_2, 1e-6)
+#
+#    # Compute canopy resistance for each layer (Eq. 6)
+#    canopy_resistance_1 = (rmin_gpu .* g_sw_1) ./ LAI_gpu
+#    canopy_resistance_2 = (rmin_gpu .* g_sw_2) ./ LAI_gpu
+#
+#    # Compute total transpiration E_t[n] (Eq. 5)
+#    transpiration = ifelse.(max_water_storage .== 0.0, 0.0, 
+#                           (1.0 .- (water_storage ./ max_water_storage) .^ (2/3)) .*
+#                           potential_evaporation .* 
+#                           (aerodynamic_resistance ./ (aerodynamic_resistance .+ rarc_gpu .+ canopy_resistance_1)))
+#    transpiration = max.(transpiration, 0.0)
+#
+#    # Extract root fractions
+#    f_1 = root_gpu[:, :, 1:1, :]  # Fraction of roots in layer 1
+#    f_2 = root_gpu[:, :, 2:2, :]  # Fraction of roots in layer 2
+#
+#    # Check conditions for transpiration supply
+#    E_1_t = zeros(size(transpiration))
+#    E_2_t = zeros(size(transpiration))
+#
+#    # Case 1: W_2[n] >= W_2^cr and f_2[n] >= 0.5, transpiration from layer 2 only
+#    # Case 2: W_1[n] >= W_1^cr and f_1[n] >= 0.5, transpiration from layer 1 only
+#    # Otherwise: Split based on root fractions
+#    E_1_t = ifelse.((W_2 .>= W_2_cr) .& (f_2 .>= 0.5), 0.0,
+#                    ifelse.((W_1 .>= W_1_cr) .& (f_1 .>= 0.5), transpiration,
+#                            transpiration .* f_1 ./ (f_1 .+ f_2 .+ 1e-6)))
+#    E_2_t = ifelse.((W_2 .>= W_2_cr) .& (f_2 .>= 0.5), transpiration,
+#                    ifelse.((W_1 .>= W_1_cr) .& (f_1 .>= 0.5), 0.0,
+#                            transpiration .* f_2 ./ (f_1 .+ f_2 .+ 1e-6)))
+#
+#    # Ensure non-negative values
+#    E_1_t = max.(E_1_t, 0.0)
+#    E_2_t = max.(E_2_t, 0.0)
+#
+#    return transpiration, E_1_t, E_2_t
+#end
+
 
 function calculate_soil_evaporation(soil_moisture, soil_moisture_max, potential_evaporation, b_i)
+
+    println("Shape of soil_moisture: ", size(soil_moisture))
+
+
     # Sum the soil moisture and maximum soil moisture across the top two layers
     topsoil_moisture = sum(soil_moisture[:, :, 1:2], dims=3)
     topsoil_moisture_max = sum(soil_moisture_max[:, :, 1:2], dims=3)
@@ -185,3 +265,42 @@ function calculate_soil_evaporation(soil_moisture, soil_moisture_max, potential_
     return Ev_sat .+ Ev_unsat
 end
 
+function update_water_canopy_storage(
+    water_storage,
+    prec_gpu,
+    canopy_evaporation,
+    max_water_storage,
+    throughfall)
+
+    # Calculate new water storage: current storage + (precipitation - canopy evaporation)
+    new_water_storage = water_storage .+ prec_gpu .- canopy_evaporation
+    
+    # Compute throughfall: excess water beyond max storage
+    throughfall = max.(0, new_water_storage .- max_water_storage)
+    
+    # Update water storage: clamp between 0 and max_water_storage
+    water_storage = max.(0.0, min.(new_water_storage, max_water_storage))
+    
+    return water_storage, throughfall
+end
+
+# Eq. (23): Total evapotranspiration
+function calculate_total_evapotranspiration(
+    canopy_evaporation,  # E_c[n]
+    transpiration,       # E_t[n]
+    soil_evaporation,    # E_1 (bare soil)
+    cv_gpu             # Cv[n]
+)
+
+
+    # Sum canopy evaporation and transpiration for vegetated classes (n = 1:nveg-1)
+    vegetated_et = cv_gpu[:, :, :, 1:end-1] .* (canopy_evaporation[:, :, :, 1:end-1] .+ transpiration[:, :, :, 1:end-1])
+    
+    # Add bare soil evaporation (n = nveg)
+    bare_soil_et = cv_gpu[:, :, :, end:end] .* soil_evaporation
+    
+    # Total evapotranspiration (sum across cover classes)
+    total_et = sum_with_nan_handling(vegetated_et, 4) .+ bare_soil_et
+  
+    return total_et
+end
