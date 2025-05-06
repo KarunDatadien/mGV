@@ -29,7 +29,7 @@ function has_input_files(year)
 end
 
 function reshape_static_inputs!()
-    global rmin_gpu, rarc_gpu
+    global rmin_gpu, rarc_gpu, cv_gpu
 
     # Check and reshape rmin_gpu if it has 3 dimensions.
     if ndims(rmin_gpu) == 3
@@ -54,17 +54,41 @@ function reshape_static_inputs!()
     else
         println("rarc_gpu already has ", ndims(rarc_gpu), " dimensions; no reshape needed.")
     end
+
+    # Check and reshape cv_gpu if it has 3 dimensions.
+    if ndims(cv_gpu) == 3
+        cv_gpu = CUDA.reshape(cv_gpu,
+                              size(cv_gpu, 1),
+                              size(cv_gpu, 2),
+                              1,
+                              size(cv_gpu, 3))
+        println("cv_gpu reshaped to: ", size(cv_gpu))
+    else
+        println("cv_gpu already has ", ndims(cv_gpu), " dimensions; no reshape needed.")
+    end
+
 end
 
 # Helper function to sum over a dimension with NaN handling
 function sum_with_nan_handling(arr::CuArray, dim::Int)
+    # Grab the element type of arr
+    elty = eltype(arr)
+
+    # Create a zero and a NaN of that same type
+    zero_val = zero(elty)
+    nan_val  = elty(NaN)
+
     # Replace NaNs with zero for summation
-    arr_no_nan = ifelse.(isnan.(arr), 0.0, arr)
+    arr_no_nan = ifelse.(isnan.(arr), zero_val, arr)
+
     # Compute sum over specified dimension
-    sum_non_nan = dropdims(sum(arr_no_nan, dims=dim), dims=dim)
+    sum_non_nan   = dropdims(sum(arr_no_nan, dims=dim), dims=dim)
+
     # Count non-NaN elements; if zero, all were NaN
     count_non_nan = dropdims(sum(.!isnan.(arr), dims=dim), dims=dim)
+
     # Replace sum with NaN where all elements were NaN
-    summed = ifelse.(count_non_nan .== 0, NaN, sum_non_nan)
+    summed = ifelse.(count_non_nan .== 0, nan_val, sum_non_nan)
+    
     return summed
 end

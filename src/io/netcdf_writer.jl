@@ -20,6 +20,10 @@ function create_output_netcdf(output_file::String, reference_array, reference_ar
     water_storage_output = defVar(out_ds, "water_storage_output", Float32, ("lon", "lat", "time", "nveg"))
     water_storage_output.attrib["units"] = "mm"
     water_storage_output.attrib["description"] = "Water stored in the canopy per vegetation"
+    
+    water_storage_summed_output = defVar(out_ds, "water_storage_summed_output", Float32, ("lon", "lat", "time"))
+    water_storage_summed_output.attrib["units"] = "mm"
+    water_storage_summed_output.attrib["description"] = "Total water stored in the canopy"
 
     Q12_output = defVar(out_ds, "Q12_output", Float32, ("lon", "lat", "time"))
     Q12_output.attrib["units"] = "mm"
@@ -29,13 +33,13 @@ function create_output_netcdf(output_file::String, reference_array, reference_ar
     tair_output.attrib["units"] = "°C"
     tair_output.attrib["description"] = "Air temperature at reference height"
 
-    tsurf_output = defVar(out_ds, "tsurf_output", Float32, ("lon", "lat", "time", "nveg"))
+    tsurf_output = defVar(out_ds, "tsurf_output", Float32, ("lon", "lat", "time"))
     tsurf_output.attrib["units"] = "°C"
     tsurf_output.attrib["description"] = "Surface temperature per vegetation"
     
-    tsurf_summed_output = defVar(out_ds, "tsurf_summed_output", Float32, ("lon", "lat", "time"))
-    tsurf_summed_output.attrib["units"] = "°C"
-    tsurf_summed_output.attrib["description"] = "Summed surface temperature"
+#    tsurf_summed_output = defVar(out_ds, "tsurf_summed_output", Float32, ("lon", "lat", "time"))
+#    tsurf_summed_output.attrib["units"] = "°C"
+#    tsurf_summed_output.attrib["description"] = "Summed surface temperature"
     
     canopy_evaporation_output = defVar(out_ds, "canopy_evaporation_output", Float32, ("lon", "lat", "time", "nveg"))
     canopy_evaporation_output.attrib["units"] = "mm"
@@ -49,9 +53,17 @@ function create_output_netcdf(output_file::String, reference_array, reference_ar
     transpiration_output.attrib["units"] = "mm"
     transpiration_output.attrib["description"] = "Plant transpiration per vegetation"
     
+    transpiration_summed_output = defVar(out_ds, "transpiration_summed_output", Float32, ("lon", "lat", "time"))
+    transpiration_summed_output.attrib["units"] = "mm"
+    transpiration_summed_output.attrib["description"] = "Total plant transpiration"
+
     aerodynamic_resistance_output = defVar(out_ds, "aerodynamic_resistance_output", Float32, ("lon", "lat", "time", "nveg"))
     aerodynamic_resistance_output.attrib["units"] = "s/m"
     aerodynamic_resistance_output.attrib["description"] = "Aerodynamic resistance per vegetation"    
+
+    aerodynamic_resistance_summed_output = defVar(out_ds, "aerodynamic_resistance_summed_output", Float32, ("lon", "lat", "time"))
+    aerodynamic_resistance_summed_output.attrib["units"] = "s/m"
+    aerodynamic_resistance_summed_output.attrib["description"] = "Total aerodynamic resistance"    
 
     potential_evaporation_output = defVar(out_ds, "potential_evaporation_output", Float32, ("lon", "lat", "time", "nveg"))
     potential_evaporation_output.attrib["units"] = "mm"
@@ -86,14 +98,26 @@ function create_output_netcdf(output_file::String, reference_array, reference_ar
     soil_temperature_output.attrib["description"] = "Soil temperature per layer"
     
     soil_moisture_output = defVar(out_ds, "soil_moisture_output", Float32, ("lon", "lat", "time", "layer"))
-    soil_moisture_output.attrib["units"] = "m^3/m^3"
+    soil_moisture_output.attrib["units"] = "kg/m^3"
     soil_moisture_output.attrib["description"] = "Volumetric soil moisture content per layer"
 
-    return out_ds, precipitation_output, water_storage_output, Q12_output,
-           tair_output, tsurf_output, tsurf_summed_output, canopy_evaporation_output,
-           canopy_evaporation_summed_output, transpiration_output, aerodynamic_resistance_output,
+    total_et_output = defVar(out_ds, "total_et_output", Float32, ("lon", "lat", "time"))
+    total_et_output.attrib["units"] = "mm"
+    total_et_output.attrib["description"] = "Total evapotranspiration, weighted sum of canopy evaporation, transpiration, and bare soil evaporation across all cover classes"
+    
+    total_runoff_output = defVar(out_ds, "total_runoff_output", Float32, ("lon", "lat", "time"))
+    total_runoff_output.attrib["units"] = "mm"
+    total_runoff_output.attrib["description"] = "Total runoff, weighted sum of surface and subsurface runoff across all cover classes"
+
+    kappa_array_output = defVar(out_ds, "kappa_array_output", Float32, ("lon", "lat", "time", "layer"))
+    cs_array_output = defVar(out_ds, "cs_array_output", Float32, ("lon", "lat", "time", "layer"))
+
+    return out_ds, precipitation_output, water_storage_output, water_storage_summed_output, Q12_output,
+           tair_output, tsurf_output, canopy_evaporation_output,
+           canopy_evaporation_summed_output, transpiration_output, transpiration_summed_output, aerodynamic_resistance_output, aerodynamic_resistance_summed_output,
            potential_evaporation_output, potential_evaporation_summed_output, net_radiation_output,
            net_radiation_summed_output, max_water_storage_output, max_water_storage_summed_output,
-           soil_evaporation_output, soil_temperature_output, soil_moisture_output
+           soil_evaporation_output, soil_temperature_output, soil_moisture_output,  total_et_output, total_runoff_output,
+           kappa_array_output, cs_array_output
 
 end
