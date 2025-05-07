@@ -248,26 +248,14 @@ function process_year(year)
 
                 @timeit to "transpiration_output"              transpiration_output[:, :, day, :]        = Array(transpiration)
                 @timeit to "transpiration_summed_output"       transpiration_summed_output[:, :, day]    = Array(sum_with_nan_handling(cv_gpu .* transpiration, 4))
-
                 @timeit to "tair_output"                       tair_output[:, :, day]                    = Array(tair_gpu)
                 @timeit to "precipitation_output"              precipitation_output[:, :, day]           = Array(prec_gpu)
-                println("Q12_output coming up")
-                println("Q_12 shape: ", size(Q_12))
 
                 @timeit to "Q12_output"                        Q12_output[:, :, day,:]                   = Array(Q_12)
-                println("soil_evaporation_output coming up")
-
                 @timeit to "soil_evaporation_output"           soil_evaporation_output[:, :, day, :]     = Array(soil_evaporation)
                 @timeit to "soil_temperature_output"           soil_temperature_output[:, :, day, :]     = Array(soil_temperature)
-                println("soil_moisture_output coming up")
-                println("soil_moisture_output shape: ", size(soil_moisture_old))
-                println(" sum_with_nan_handling(soil_moisture_old, 3) shape: ", size(sum_with_nan_handling(soil_moisture_old, 3)))
-                println(" cv_gpushape: ", size(cv_gpu))
-
                 @timeit to "soil_moisture_output"              soil_moisture_output[:, :, day, :]        = Array(sum_with_nan_handling(cv_gpu .* soil_moisture_new, 4))
        
-                println("total_et_output coming up")
-
                 @timeit to "total_et_output"                   total_et_output[:, :, day]                = Array(total_et)
                 @timeit to "total_runoff_output"               total_runoff_output[:, :, day]            = Array(total_runoff)
                 @timeit to "kappa_array_output"                kappa_array_output[:, :, day,:]           = Array(kappa_array)
