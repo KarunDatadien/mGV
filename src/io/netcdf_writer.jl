@@ -25,7 +25,7 @@ function create_output_netcdf(output_file::String, reference_array, reference_ar
     water_storage_summed_output.attrib["units"] = "mm"
     water_storage_summed_output.attrib["description"] = "Total water stored in the canopy"
 
-    Q12_output = defVar(out_ds, "Q12_output", Float32, ("lon", "lat", "time"))
+    Q12_output = defVar(out_ds, "Q12_output", Float32, ("lon", "lat", "time", "nveg"))
     Q12_output.attrib["units"] = "mm"
     Q12_output.attrib["description"] = "Drainage from layer 1 to layer 2"
     

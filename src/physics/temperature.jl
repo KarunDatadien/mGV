@@ -128,7 +128,7 @@ function solve_surface_temperature(
     println("Shape of Ts_new: ", size(Ts_new))
 
     tolerance = 1e-6
-    max_iter = 20
+    max_iter = 5
 
     println("Initial Ts_new min/max: ", minimum(Ts_new), " / ", maximum(Ts_new))
     for iter in 1:max_iter

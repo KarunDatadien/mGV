@@ -125,120 +125,122 @@ function calculate_canopy_evaporation(water_storage, max_water_storage, potentia
 end
 
 
-function calculate_transpiration(
-    potential_evaporation::CuArray, aerodynamic_resistance::CuArray, rarc_gpu::CuArray,  
-    water_storage::CuArray, max_water_storage::CuArray, soil_moisture_old::CuArray, soil_moisture_critical::CuArray, 
-    wilting_point::CuArray, root_gpu::CuArray
-)
-#    println("soil_moisture_old shape: ", size(soil_moisture_old))
-#    println("soil_moisture_critical shape: ", size(soil_moisture_critical))
-#    println("wilting_point shape: ", size(wilting_point))
-#    println("root_gpu shape: ", size(root_gpu))
-
-    # Compute stress factor
-    #gsm_inv = calculate_gsm_inv(soil_moisture_old, soil_moisture_critical, wilting_point)
-    #println("gsm_inv shape: ", size(gsm_inv))
-
-    # Expand for broadcasting
-   # gsm_inv_exp = reshape(gsm_inv, size(gsm_inv,1), size(gsm_inv,2), size(gsm_inv,3), 1)
-    #println("g_sm_exp shape: ", size(g_sm_exp))
-
-    canopy_resistance = compute_partial_canopy_resistance(rmin_gpu, LAI_gpu) # ./ gsm_inv # Eq. (6), TODO: add the gsm_inv multiplication
-
-    ## Calculate modifier factor
-    transpiration = (1.0 .- (water_storage ./ max_water_storage) .^ (2/3)) .* potential_evaporation .* (aerodynamic_resistance ./ (aerodynamic_resistance .+ rarc_gpu .+ canopy_resistance))
-#
-    ## Compute layer-wise transpiration
-    #E_layer = factor .* (aerodynamic_resistance ./ (aerodynamic_resistance .+ rarc_gpu .+ canopy_resistance_exp ./ g_sm_exp))
-    #println("E_layer shape: ", size(E_layer))
-#
-    ## Weighted sum with root fraction
-    #E_t = sum(root_gpu .* E_layer, dims=3)
-    #println("E_t shape (final transpiration): ", size(E_t))
-
-    return transpiration
-end
-
 #function calculate_transpiration(
 #    potential_evaporation::CuArray, aerodynamic_resistance::CuArray, rarc_gpu::CuArray,  
-#    water_storage::CuArray, max_water_storage::CuArray, soil_moisture_old::CuArray, 
-#    soil_moisture_critical::CuArray, wilting_point::CuArray, root_gpu::CuArray, 
-#    rmin_gpu::CuArray, LAI_gpu::CuArray
+#    water_storage::CuArray, max_water_storage::CuArray, soil_moisture_old::CuArray, soil_moisture_critical::CuArray, 
+#    wilting_point::CuArray, root_gpu::CuArray
 #)
-#    # Replace NaN or large values with 0.0
-#    potential_evaporation .= ifelse.(isnan.(potential_evaporation) .| (potential_evaporation .> 1e30), 0.0, potential_evaporation)
-#    water_storage .= ifelse.(isnan.(water_storage) .| (water_storage .> 1e30), 0.0, water_storage)
-#    max_water_storage .= ifelse.(isnan.(max_water_storage) .| (max_water_storage .> 1e30), 0.0, max_water_storage)
-#    aerodynamic_resistance .= ifelse.(isnan.(aerodynamic_resistance) .| (aerodynamic_resistance .> 1e30), 0.0, aerodynamic_resistance)
-#    rarc_gpu .= ifelse.(isnan.(rarc_gpu) .| (rarc_gpu .> 1e30), 0.0, rarc_gpu)
+##    println("soil_moisture_old shape: ", size(soil_moisture_old))
+##    println("soil_moisture_critical shape: ", size(soil_moisture_critical))
+##    println("wilting_point shape: ", size(wilting_point))
+##    println("root_gpu shape: ", size(root_gpu))
 #
-#    # Compute soil moisture for layers 1 and 2 (sum of sub-layers for layer 1)
-#    W_1 = sum(soil_moisture_old[:, :, 1:2, :], dims=3)  # Layer 1: sum of sub-layers 1 and 2
-#    W_2 = soil_moisture_old[:, :, 3:3, :]  # Layer 2: third sub-layer
+#    # Compute stress factor
+#    #gsm_inv = calculate_gsm_inv(soil_moisture_old, soil_moisture_critical, wilting_point)
+#    #println("gsm_inv shape: ", size(gsm_inv))
 #
-#    # Extract critical and wilting point values for layers 1 and 2
-#    W_1_cr = sum(soil_moisture_critical[:, :, 1:2, :], dims=3)
-#    W_2_cr = soil_moisture_critical[:, :, 3:3, :]
-#    W_1_star = sum(wilting_point[:, :, 1:2, :], dims=3)
-#    W_2_star = wilting_point[:, :, 3:3, :]
+#    # Expand for broadcasting
+#   # gsm_inv_exp = reshape(gsm_inv, size(gsm_inv,1), size(gsm_inv,2), size(gsm_inv,3), 1)
+#    #println("g_sm_exp shape: ", size(g_sm_exp))
 #
-#    # Compute soil moisture stress factor g_sw^{-1} for each layer (Eq. 7)
-#    g_sw_inv_1 = ifelse.(W_1 .>= W_1_cr, 1.0,
-#                        ifelse.(W_1 .< W_1_star, 0.0,
-#                                (W_1 .- W_1_star) ./ (W_1_cr .- W_1_star)))
-#    g_sw_inv_2 = ifelse.(W_2 .>= W_2_cr, 1.0,
-#                        ifelse.(W_2 .< W_2_star, 0.0,
-#                                (W_2 .- W_2_star) ./ (W_2_cr .- W_2_star)))
+#    canopy_resistance = compute_partial_canopy_resistance(rmin_gpu, LAI_gpu) # ./ gsm_inv # Eq. (6), TODO: add the gsm_inv multiplication
 #
-#    # Invert to get g_sw
-#    g_sw_1 = 1.0 ./ max.(g_sw_inv_1, 1e-6)  # Avoid division by zero
-#    g_sw_2 = 1.0 ./ max.(g_sw_inv_2, 1e-6)
+#    ## Calculate modifier factor
+#    transpiration = (1.0 .- (water_storage ./ max_water_storage) .^ (2/3)) .* potential_evaporation .* (aerodynamic_resistance ./ (aerodynamic_resistance .+ rarc_gpu .+ canopy_resistance))
+##
+#    ## Compute layer-wise transpiration
+#    #E_layer = factor .* (aerodynamic_resistance ./ (aerodynamic_resistance .+ rarc_gpu .+ canopy_resistance_exp ./ g_sm_exp))
+#    #println("E_layer shape: ", size(E_layer))
+##
+#    ## Weighted sum with root fraction
+#    #E_t = sum(root_gpu .* E_layer, dims=3)
+#    #println("E_t shape (final transpiration): ", size(E_t))
 #
-#    # Compute canopy resistance for each layer (Eq. 6)
-#    canopy_resistance_1 = (rmin_gpu .* g_sw_1) ./ LAI_gpu
-#    canopy_resistance_2 = (rmin_gpu .* g_sw_2) ./ LAI_gpu
-#
-#    # Compute total transpiration E_t[n] (Eq. 5)
-#    transpiration = ifelse.(max_water_storage .== 0.0, 0.0, 
-#                           (1.0 .- (water_storage ./ max_water_storage) .^ (2/3)) .*
-#                           potential_evaporation .* 
-#                           (aerodynamic_resistance ./ (aerodynamic_resistance .+ rarc_gpu .+ canopy_resistance_1)))
-#    transpiration = max.(transpiration, 0.0)
-#
-#    # Extract root fractions
-#    f_1 = root_gpu[:, :, 1:1, :]  # Fraction of roots in layer 1
-#    f_2 = root_gpu[:, :, 2:2, :]  # Fraction of roots in layer 2
-#
-#    # Check conditions for transpiration supply
-#    E_1_t = zeros(size(transpiration))
-#    E_2_t = zeros(size(transpiration))
-#
-#    # Case 1: W_2[n] >= W_2^cr and f_2[n] >= 0.5, transpiration from layer 2 only
-#    # Case 2: W_1[n] >= W_1^cr and f_1[n] >= 0.5, transpiration from layer 1 only
-#    # Otherwise: Split based on root fractions
-#    E_1_t = ifelse.((W_2 .>= W_2_cr) .& (f_2 .>= 0.5), 0.0,
-#                    ifelse.((W_1 .>= W_1_cr) .& (f_1 .>= 0.5), transpiration,
-#                            transpiration .* f_1 ./ (f_1 .+ f_2 .+ 1e-6)))
-#    E_2_t = ifelse.((W_2 .>= W_2_cr) .& (f_2 .>= 0.5), transpiration,
-#                    ifelse.((W_1 .>= W_1_cr) .& (f_1 .>= 0.5), 0.0,
-#                            transpiration .* f_2 ./ (f_1 .+ f_2 .+ 1e-6)))
-#
-#    # Ensure non-negative values
-#    E_1_t = max.(E_1_t, 0.0)
-#    E_2_t = max.(E_2_t, 0.0)
-#
-#    return transpiration, E_1_t, E_2_t
+#    return transpiration
 #end
+
+function calculate_transpiration(
+    potential_evaporation::CuArray, aerodynamic_resistance::CuArray, rarc_gpu::CuArray,  
+    water_storage::CuArray, max_water_storage::CuArray, soil_moisture_old::CuArray, 
+    soil_moisture_critical::CuArray, wilting_point::CuArray, root_gpu::CuArray, 
+    rmin_gpu::CuArray, LAI_gpu::CuArray
+)
+    # Replace NaN or large values with 0.0
+    potential_evaporation .= ifelse.(isnan.(potential_evaporation) .| (potential_evaporation .> 1e30), 0.0, potential_evaporation)
+    water_storage .= ifelse.(isnan.(water_storage) .| (water_storage .> 1e30), 0.0, water_storage)
+    max_water_storage .= ifelse.(isnan.(max_water_storage) .| (max_water_storage .> 1e30), 0.0, max_water_storage)
+    aerodynamic_resistance .= ifelse.(isnan.(aerodynamic_resistance) .| (aerodynamic_resistance .> 1e30), 0.0, aerodynamic_resistance)
+    rarc_gpu .= ifelse.(isnan.(rarc_gpu) .| (rarc_gpu .> 1e30), 0.0, rarc_gpu)
+
+    # Compute soil moisture for layers 1 and 2 (sum of sub-layers for layer 1)
+    W_1 = sum(soil_moisture_old[:, :, 1:2, :], dims=3)  # Layer 1: sum of sub-layers 1 and 2
+    W_2 = soil_moisture_old[:, :, 3:3, :]  # Layer 2: third sub-layer
+
+    # Extract critical and wilting point values for layers 1 and 2
+    W_1_cr = sum(soil_moisture_critical[:, :, 1:2, :], dims=3)
+    W_2_cr = soil_moisture_critical[:, :, 3:3, :]
+    W_1_star = sum(wilting_point[:, :, 1:2, :], dims=3)
+    W_2_star = wilting_point[:, :, 3:3, :]
+
+    # Compute soil moisture stress factor g_sw^{-1} for each layer (Eq. 7)
+    g_sw_inv_1 = ifelse.(W_1 .>= W_1_cr, 1.0,
+                        ifelse.(W_1 .< W_1_star, 0.0,
+                                (W_1 .- W_1_star) ./ (W_1_cr .- W_1_star)))
+    g_sw_inv_2 = ifelse.(W_2 .>= W_2_cr, 1.0,
+                        ifelse.(W_2 .< W_2_star, 0.0,
+                                (W_2 .- W_2_star) ./ (W_2_cr .- W_2_star)))
+
+    # Invert to get g_sw
+    g_sw_1 = 1.0 ./ max.(g_sw_inv_1, 1e-6)  # Avoid division by zero
+    g_sw_2 = 1.0 ./ max.(g_sw_inv_2, 1e-6)
+
+    # Compute canopy resistance for each layer (Eq. 6)
+    canopy_resistance_1 = (rmin_gpu .* g_sw_1) ./ LAI_gpu
+    canopy_resistance_2 = (rmin_gpu .* g_sw_2) ./ LAI_gpu
+
+    # Compute total transpiration E_t[n] (Eq. 5)
+    transpiration = ifelse.(max_water_storage .== 0.0, 0.0, 
+                           (1.0 .- (water_storage ./ max_water_storage) .^ (2/3)) .*
+                           potential_evaporation .* 
+                           (aerodynamic_resistance ./ (aerodynamic_resistance .+ rarc_gpu .+ canopy_resistance_1)))
+    transpiration = max.(transpiration, 0.0)
+
+    # Extract root fractions
+    f_1 = root_gpu[:, :, 1:1, :]  # Fraction of roots in layer 1
+    f_2 = root_gpu[:, :, 2:2, :]  # Fraction of roots in layer 2
+
+    # Check conditions for transpiration supply
+    E_1_t = zeros(size(transpiration))
+    E_2_t = zeros(size(transpiration))
+
+    # Case 1: W_2[n] >= W_2^cr and f_2[n] >= 0.5, transpiration from layer 2 only
+    # Case 2: W_1[n] >= W_1^cr and f_1[n] >= 0.5, transpiration from layer 1 only
+    # Otherwise: Split based on root fractions
+    E_1_t = ifelse.((W_2 .>= W_2_cr) .& (f_2 .>= 0.5), 0.0,
+                    ifelse.((W_1 .>= W_1_cr) .& (f_1 .>= 0.5), transpiration,
+                            transpiration .* f_1 ./ (f_1 .+ f_2 .+ 1e-6)))
+    E_2_t = ifelse.((W_2 .>= W_2_cr) .& (f_2 .>= 0.5), transpiration,
+                    ifelse.((W_1 .>= W_1_cr) .& (f_1 .>= 0.5), 0.0,
+                            transpiration .* f_2 ./ (f_1 .+ f_2 .+ 1e-6)))
+
+    # Ensure non-negative values
+    E_1_t = max.(E_1_t, 0.0)
+    E_2_t = max.(E_2_t, 0.0)
+
+    return transpiration, E_1_t, E_2_t
+end
 
 
 function calculate_soil_evaporation(soil_moisture, soil_moisture_max, potential_evaporation, b_i)
 
     println("Shape of soil_moisture: ", size(soil_moisture))
 
-
     # Sum the soil moisture and maximum soil moisture across the top two layers
-    topsoil_moisture = sum(soil_moisture[:, :, 1:2], dims=3)
-    topsoil_moisture_max = sum(soil_moisture_max[:, :, 1:2], dims=3)
+    topsoil_moisture = sum(soil_moisture[:, :, 1:2, end:end], dims=3)
+    println("Shape of topsoil_moisture: ", size(topsoil_moisture))
+
+    topsoil_moisture_max = sum(soil_moisture_max[:, :, 1:2, end:end], dims=3)
+    println("Shape of topsoil_moisture_max: ", size(topsoil_moisture_max))
 
     # Compute the saturated area fraction
     A_sat = 1.0 .- (1.0 .- topsoil_moisture ./ topsoil_moisture_max) .^ b_i
@@ -256,10 +258,10 @@ function calculate_soil_evaporation(soil_moisture, soil_moisture_max, potential_
     i_0 = i_m .* (1.0 .- (1.0 .- A_sat) .^ (1.0 ./ b_i))  # Eq. 13
 
     # Unsaturated evaporation contribution
-    Ev_unsat = potential_evaporation[:, :, :, end] .* i_0 ./ i_m .* x .* S_series
+    Ev_unsat = potential_evaporation[:, :, :, end:end] .* i_0 ./ i_m .* x .* S_series
 
     # Saturated evaporation contribution
-    Ev_sat = potential_evaporation[:, :, :, end] .* A_sat
+    Ev_sat = potential_evaporation[:, :, :, end:end] .* A_sat
 
     # Total soil evaporation
     return Ev_sat .+ Ev_unsat
