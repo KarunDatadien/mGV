@@ -89,8 +89,8 @@ function solve_surface_temperature(tsurf, soil_temperature, albedo, Rs, RL, rh, 
     Ts_old = tsurf  # Initial guess on GPU
     Ts_new = tsurf
 
-    tolerance = 1e-6
-    max_iter = 5
+    tolerance = 1e-3
+    max_iter = 2
 
     for iter in 1:max_iter
         residual = f(Ts_new, Ts_old)
@@ -116,8 +116,6 @@ function solve_surface_temperature(tsurf, soil_temperature, albedo, Rs, RL, rh, 
         max_delta = maximum(abs.(delta_Ts))  # Use CUDA.maximum for CuArray
         min_delta = minimum(abs.(delta_Ts))  # Use CUDA.minimum for CuArray
         num_converged = sum(converged)  # Number of converged points
-        println("Iteration $iter: Max delta Ts = $max_delta")
-        println("Iteration $iter: Min delta Ts = $min_delta")
         println("Iteration $iter: Number of converged points = $num_converged")
         println("Iteration $iter: Ts_new min/max: ", minimum(Ts_new), " / ", maximum(Ts_new))
 
