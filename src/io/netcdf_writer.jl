@@ -27,8 +27,12 @@ function create_output_netcdf(output_file::String, reference_array, reference_ar
 
     Q12_output = defVar(out_ds, "Q12_output", Float32, ("lon", "lat", "time", "nveg"))
     Q12_output.attrib["units"] = "mm"
-    Q12_output.attrib["description"] = "Drainage from layer 1 to layer 2"
+    Q12_output.attrib["description"] = "Drainage from layer 1 to layer 2 per vegetation"
     
+    Q12_summed_output = defVar(out_ds, "Q12_summed_output", Float32, ("lon", "lat", "time"))
+    Q12_summed_output.attrib["units"] = "mm"
+    Q12_summed_output.attrib["description"] = "Total drainage from layer 1 to layer 2"
+
     tair_output = defVar(out_ds, "tair_output", Float32, ("lon", "lat", "time"))
     tair_output.attrib["units"] = "°C"
     tair_output.attrib["description"] = "Air temperature at reference height"
@@ -112,7 +116,7 @@ function create_output_netcdf(output_file::String, reference_array, reference_ar
     kappa_array_output = defVar(out_ds, "kappa_array_output", Float32, ("lon", "lat", "time", "layer"))
     cs_array_output = defVar(out_ds, "cs_array_output", Float32, ("lon", "lat", "time", "layer"))
 
-    return out_ds, precipitation_output, water_storage_output, water_storage_summed_output, Q12_output,
+    return out_ds, precipitation_output, water_storage_output, water_storage_summed_output, Q12_output, Q12_summed_output,
            tair_output, tsurf_output, canopy_evaporation_output,
            canopy_evaporation_summed_output, transpiration_output, transpiration_summed_output, aerodynamic_resistance_output, aerodynamic_resistance_summed_output,
            potential_evaporation_output, potential_evaporation_summed_output, net_radiation_output,

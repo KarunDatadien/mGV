@@ -93,7 +93,7 @@ function process_year(year)
     println("Opening output file...")
     output_file = joinpath(output_dir, "$(output_file_prefix)$(year).nc")
     
-    @time out_ds, precipitation_output, water_storage_output, water_storage_summed_output, Q12_output,
+    @time out_ds, precipitation_output, water_storage_output, water_storage_summed_output, Q12_output, Q12_summed_output,
           tair_output, tsurf_output, canopy_evaporation_output, canopy_evaporation_summed_output, 
           transpiration_output, transpiration_summed_output, aerodynamic_resistance_output, aerodynamic_resistance_summed_output,
           potential_evaporation_output, potential_evaporation_summed_output, net_radiation_output,
@@ -241,8 +241,6 @@ function process_year(year)
                 ### Variables without fill-value replacement ###
                 @timeit to "tsurf_output"                      tsurf_output[:, :, day]                = Array(tsurf)
 
-                @timeit to "potential_evaporation_output"      potential_evaporation_output[:, :, day, :] = Array(potential_evaporation)
-                @timeit to "potential_evaporation_summed_output"      potential_evaporation_summed_output[:, :, day] = Array(sum_with_nan_handling(cv_gpu .* potential_evaporation, 4))
                 @timeit to "aerodynamic_resistance_output"     aerodynamic_resistance_output[:, :, day, :] = Array(aerodynamic_resistance)
                 @timeit to "aerodynamic_resistance_summed_output"     aerodynamic_resistance_summed_output[:, :, day] = Array(sum_with_nan_handling(aerodynamic_resistance, 4))
 
@@ -251,7 +249,10 @@ function process_year(year)
                 @timeit to "tair_output"                       tair_output[:, :, day]                    = Array(tair_gpu)
                 @timeit to "precipitation_output"              precipitation_output[:, :, day]           = Array(prec_gpu)
 
-                @timeit to "Q12_output"                        Q12_output[:, :, day,:]                   = Array(Q_12)
+                @timeit to "Q12_processed"                     Q12_processed                             = ifelse.(abs.(Q_12) .> 1e30, NaN, Q_12)       
+                @timeit to "Q12_output"                        Q12_output[:, :, day, :]                  = Array(Q_12) 
+                @timeit to "Q12_summed_output"                 Q12_summed_output[:, :, day]              = Array(sum_with_nan_handling(cv_gpu .* Q_12, 4)) 
+
                 @timeit to "soil_evaporation_output"           soil_evaporation_output[:, :, day, :]     = Array(soil_evaporation)
                 @timeit to "soil_temperature_output"           soil_temperature_output[:, :, day, :]     = Array(soil_temperature)
                 @timeit to "soil_moisture_output"              soil_moisture_output[:, :, day, :]        = Array(sum_with_nan_handling(cv_gpu .* soil_moisture_new, 4))
@@ -261,7 +262,11 @@ function process_year(year)
                 @timeit to "kappa_array_output"                kappa_array_output[:, :, day,:]           = Array(kappa_array)
                 @timeit to "cs_array_output"                   cs_array_output[:, :, day,:]              = Array(cs_array)
 
-                ### Variables with fill-value replacement ###                
+                ### Variables with fill-value replacement ###        
+                @timeit to "potential_evaporation_processed"          potential_evaporation_processed = ifelse.(abs.(potential_evaporation) .> 1e30, NaN, potential_evaporation)       
+                @timeit to "potential_evaporation_output"             potential_evaporation_output[:, :, day, :] = Array(potential_evaporation_processed)
+                @timeit to "potential_evaporation_summed_output"      potential_evaporation_summed_output[:, :, day] = Array(sum_with_nan_handling(cv_gpu .* potential_evaporation, 4))
+
                 @timeit to "water_storage_processed"           water_storage_processed = ifelse.(abs.(water_storage) .> 1e30, NaN, water_storage)
                 @timeit to "water_storage_output"              water_storage_output[:, :, day, :]        = Array(water_storage_processed)
                 @timeit to "water_storage_summed_output"       water_storage_summed_output[:, :, day]    = Array(sum_with_nan_handling(water_storage_processed, 4))
@@ -272,7 +277,7 @@ function process_year(year)
             
                 @timeit to "canopy_evaporation_processed"      canopy_evaporation_processed = ifelse.(abs.(canopy_evaporation) .> 1e30, NaN, canopy_evaporation)
                 @timeit to "canopy_evaporation_output"         canopy_evaporation_output[:, :, day, :]   = Array(canopy_evaporation_processed)
-                @timeit to "canopy_evaporation_summed_output"  canopy_evaporation_summed_output[:, :, day] = Array(sum_with_nan_handling(canopy_evaporation_processed, 4))
+                @timeit to "canopy_evaporation_summed_output"  canopy_evaporation_summed_output[:, :, day] = Array(sum_with_nan_handling(cv_gpu .* canopy_evaporation_processed, 4))
             
                 @timeit to "max_water_storage_processed"       max_water_storage_processed = ifelse.(abs.(max_water_storage) .> 1e30, NaN, max_water_storage)
                 @timeit to "max_water_storage_output"          max_water_storage_output[:, :, day, :]    = Array(max_water_storage_processed)
