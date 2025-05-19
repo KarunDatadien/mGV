@@ -60,8 +60,7 @@ global soil_moisture_old = CUDA.zeros(Float32, size(soil_dens_gpu, 1), size(soil
 global soil_moisture_new = CUDA.zeros(Float32, size(soil_dens_gpu, 1), size(soil_dens_gpu, 2), size(soil_dens_gpu, 3), size(coverage_gpu, 4))
 global soil_moisture_max = CUDA.zeros(Float32, size(soil_dens_gpu, 1), size(soil_dens_gpu, 2), size(soil_dens_gpu, 3), size(coverage_gpu, 4))
 
-# Repeat init_moist_gpu along the 4th dimension
-soil_moisture_new = repeat(init_moist_gpu, outer=(1, 1, 1, size(coverage_gpu, 4)))
+
 
 soil_temperature[:, :, 1:1] .= Tavg_gpu
 soil_temperature[:, :, 2:2] .= Tavg_gpu
@@ -71,6 +70,9 @@ soil_temperature[:, :, 3:3] .= Tavg_gpu
 bulk_dens_min, soil_dens_min, porosity, soil_moisture_max, soil_moisture_critical, field_capacity, wilting_point = 
     calculate_soil_properties(bulk_dens_gpu, soil_dens_gpu, depth_gpu, Wcr_gpu, Wfc_gpu, Wpwp_gpu)
 
+# Repeat init_moist_gpu along the 4th dimension (TODO: note, I changed init_moist_gpu here to field_capacity after discussions with modelling group)
+#soil_moisture_new = repeat(init_moist_gpu, outer=(1, 1, 1, size(coverage_gpu, 4)))
+soil_moisture_new = repeat(field_capacity, outer=(1, 1, 1, size(coverage_gpu, 4)))
 soil_moisture_max = repeat(soil_moisture_max, outer=(1, 1, 1, size(coverage_gpu, 4)))
 
 function process_year(year)
@@ -211,14 +213,21 @@ function process_year(year)
                     depth_gpu,             
                     day_sec,               # TODO: should be 1 instead of day_sec? (time step in seconds -> 1 day in s)
                     cs_array,
-                    total_et
+                    total_et,
+                    tair_gpu
                 ) 
+
+                println("INIT TEMPERATURE")
 
                 @timeit to "compute_aerodynamic_resistance" aerodynamic_resistance = compute_aerodynamic_resistance(
                     z2, d0_gpu, z0_gpu, K, tsurf, tair_gpu, wind_gpu
                 ) # Eq. (3). 
 
+                println("INIT COMPUTE AERODYNAMIC")
+
             end
+
+            println("NEW TEMPERATURE")
 
             @timeit to "solve_surface_temperature" tsurf = solve_surface_temperature(
                 tsurf,          # Surface temperature (CuArray)
@@ -231,8 +240,10 @@ function process_year(year)
                 depth_gpu,             
                 day_sec,               # TODO: should be 1 instead of day_sec? (time step in seconds -> 1 day in s)
                 cs_array,
-                total_et
+                total_et,
+                tair_gpu
             ) 
+            println("NEW TEMPERATURE CALCULATED")
 
 
 

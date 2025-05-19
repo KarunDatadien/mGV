@@ -1,4 +1,4 @@
-function solve_surface_temperature(tsurf, soil_temperature, albedo, Rs, RL, rh, kappa, depth_gpu, delta_t, Cs, total_et)
+function solve_surface_temperature(tsurf, soil_temperature, albedo, Rs, RL, rh, kappa, depth_gpu, delta_t, Cs, total_et, T_a)
 
     albedo = sum_with_nan_handling(albedo, 4)
     albedo .= ifelse.(isnan.(albedo) .| (abs.(albedo) .> 1e30), 0.0, albedo)
@@ -8,11 +8,13 @@ function solve_surface_temperature(tsurf, soil_temperature, albedo, Rs, RL, rh, 
     kappa .= ifelse.(isnan.(kappa) .| (abs.(kappa) .> 1e30), 0.0, kappa)
     Cs .= ifelse.(isnan.(Cs) .| (abs.(Cs) .> 1e30), 0.0, Cs)
 
-    T1 = soil_temperature[:, :, 2:2]
-    T2 = soil_temperature[:, :, 3:3]
+    T1_K = soil_temperature[:, :, 2:2] .+ 273.15
+    T2_K = soil_temperature[:, :, 3:3] .+ 273.15
 
     D1 = sum(depth_gpu[:, :, 1:2], dims=3) 
     D2 = depth_gpu[:,:, 3:3]
+
+    T_a_K = T_a .+ 273.15
 
     # === Compute dependent quantities ===
     latent_heat = calculate_latent_heat(tsurf) # should be with dimension W*m^-2
@@ -33,15 +35,15 @@ function solve_surface_temperature(tsurf, soil_temperature, albedo, Rs, RL, rh, 
 
         # Convert to Kelvin for Stefan-Boltzmann term
         Ts_new_K = Ts_new .+ 273.15
-        lhs = emissivity .* sigma .* Ts_new_K.^4 .+ common_term .* Ts_new
+        lhs = emissivity .* sigma .* Ts_new_K.^4 .+ common_term .* Ts_new_K
 
         # Incoming radiative and turbulent fluxes
         term1 = (1 .- albedo) .* Rs
         term2 = emissivity .* RL
         
         # Sensible‐heat exchange with atmosphere
-        term3 = (rho_a .* c_p_air ./ max.(rh, 1e-3)) .* Ts_new
-        
+        term3 = (rho_a .* c_p_air ./ max.(rh, 1e-3)) .* T_a_K  # T_a_K in Kelvin
+
         # Latent‐heat loss via evapotranspiration
         term4 = rho_w .* calculate_latent_heat(Ts_new) .* (total_et ./ (day_sec .* mm_in_m))
         
@@ -49,8 +51,8 @@ function solve_surface_temperature(tsurf, soil_temperature, albedo, Rs, RL, rh, 
         term5 = (rho_a .* c_p_air .* D1 .* Ts_old) ./ (2 * delta_t)
         
         # Conductive exchange with soil layers
-        num   = (kappa_top .* T2 ./ D2) .+
-                (Cs_top  .* D2 .* T1 ./ (2 * delta_t))
+        num   = (kappa_top .* T2_K ./ D2) .+
+                (Cs_top  .* D2 .* T1_K ./ (2 * delta_t))
         den   = 1 .+
                 (D1 ./ D2) .+
                 (Cs_top .* D1 .* D2 ./ (2 * delta_t .* kappa_top))
@@ -90,7 +92,7 @@ function solve_surface_temperature(tsurf, soil_temperature, albedo, Rs, RL, rh, 
     Ts_new = tsurf
 
     tolerance = 1e-3
-    max_iter = 2
+    max_iter = 10
 
     for iter in 1:max_iter
         residual = f(Ts_new, Ts_old)
