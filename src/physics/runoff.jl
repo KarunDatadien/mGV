@@ -45,7 +45,8 @@ function calculate_subsurface_runoff(soil_moisture_old, soil_moisture_max, Ds_gp
     Ws_fraction = Ws_gpu .* bottomsoil_moisture_max         # W_s * W_2^c, shape (204, 180, 1)
 
     # Initialize subsurface runoff (Q_b * Δt, assuming Δt = 1 day)
-    Q_b = CUDA.zeros(Float32, 204, 180, 1) #TODO  what is initial Q_b?
+    Q_b = CUDA.zeros(Float32, size(bottomsoil_moisture, 1), size(bottomsoil_moisture, 2), size(bottomsoil_moisture, 3))
+
 
     # Compute subsurface runoff using ifelse for Eq. 21a and 21b
     Q_b = ifelse.(
@@ -66,8 +67,8 @@ end
 # Eq. (24): Total runoff
 function calculate_total_runoff(surface_runoff, subsurface_runoff, cv_gpu)
 
-    surface_runoff .= ifelse.(isnan.(surface_runoff) .| (surface_runoff .> 1e30), 0.0, surface_runoff) # Q_d[n]
-    subsurface_runoff .= ifelse.(isnan.(subsurface_runoff) .| (subsurface_runoff .> 1e30), 0.0, subsurface_runoff) # Q_b[n]
+    surface_runoff .= ifelse.(isnan.(surface_runoff) .| (abs.(surface_runoff) .> fillvalue_threshold), 0.0, surface_runoff) # Q_d[n]
+    subsurface_runoff .= ifelse.(isnan.(subsurface_runoff) .| (abs.(subsurface_runoff) .> fillvalue_threshold), 0.0, subsurface_runoff) # Q_b[n]
 
     # Sum surface and subsurface runoff, weighted by coverage
     total_runoff = sum_with_nan_handling(cv_gpu .* (surface_runoff .+ subsurface_runoff), 4) # C_v[n]

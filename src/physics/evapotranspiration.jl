@@ -64,16 +64,16 @@ end
 function calculate_max_water_storage(LAI_gpu)
     # Compute maximum water intercepted/stored in the canopy cover
     result = K_L .* LAI_gpu
-    return ifelse.(isnan.(result) .| (result .> 1e30), 0.0, result)
+    return ifelse.(isnan.(result) .| (abs.(result) .> fillvalue_threshold), 0.0, result)
 end
 
 function calculate_canopy_evaporation(water_storage, max_water_storage, potential_evaporation, aerodynamic_resistance, rarc, prec_gpu)
 
-    potential_evaporation .= ifelse.(isnan.(potential_evaporation) .| (potential_evaporation .> 1e30), 0.0, potential_evaporation)
-    water_storage .= ifelse.(isnan.(water_storage) .| (water_storage .> 1e30), 0.0, water_storage)
-    max_water_storage .= ifelse.(isnan.(max_water_storage) .| (max_water_storage .> 1e30), 0.0, max_water_storage)
-    aerodynamic_resistance .= ifelse.(isnan.(aerodynamic_resistance) .| (aerodynamic_resistance .> 1e30), 0.0, aerodynamic_resistance)
-    rarc .= ifelse.(isnan.(rarc) .| (rarc .> 1e30), 0.0, rarc)
+    potential_evaporation .= ifelse.(isnan.(potential_evaporation) .| (abs.(potential_evaporation) .> fillvalue_threshold), 0.0, potential_evaporation)
+    water_storage .= ifelse.(isnan.(water_storage) .| (abs.(water_storage) .> fillvalue_threshold), 0.0, water_storage)
+    max_water_storage .= ifelse.(isnan.(max_water_storage) .| (abs.(max_water_storage) .> fillvalue_threshold), 0.0, max_water_storage)
+    aerodynamic_resistance .= ifelse.(isnan.(aerodynamic_resistance) .| (abs.(aerodynamic_resistance) .> fillvalue_threshold), 0.0, aerodynamic_resistance)
+    rarc .= ifelse.(isnan.(rarc) .| (abs.(rarc) .> fillvalue_threshold), 0.0, rarc)
 
     # Compute potential canopy evaporation
     canopy_evaporation_star = (water_storage ./ max_water_storage).^(2 / 3) .* potential_evaporation .* 
@@ -84,7 +84,7 @@ function calculate_canopy_evaporation(water_storage, max_water_storage, potentia
 
     # Compute actual canopy evaporation
     canopy_evaporation = f_n .* canopy_evaporation_star
-    canopy_evaporation = ifelse.(isnan.(canopy_evaporation) .| (canopy_evaporation .> 1e30), 0.0, canopy_evaporation)
+    canopy_evaporation = ifelse.(isnan.(canopy_evaporation) .| (abs.(canopy_evaporation) .> fillvalue_threshold), 0.0, canopy_evaporation)
 
     return canopy_evaporation
 end
@@ -96,11 +96,11 @@ function calculate_transpiration(
     rmin_gpu::CuArray, LAI_gpu::CuArray
 )
     # Replace NaN or large values with 0.0
-    potential_evaporation .= ifelse.(isnan.(potential_evaporation) .| (potential_evaporation .> 1e30), 0.0, potential_evaporation)
-    water_storage .= ifelse.(isnan.(water_storage) .| (water_storage .> 1e30), 0.0, water_storage)
-    max_water_storage .= ifelse.(isnan.(max_water_storage) .| (max_water_storage .> 1e30), 0.0, max_water_storage)
-    aerodynamic_resistance .= ifelse.(isnan.(aerodynamic_resistance) .| (aerodynamic_resistance .> 1e30), 0.0, aerodynamic_resistance)
-    rarc_gpu .= ifelse.(isnan.(rarc_gpu) .| (rarc_gpu .> 1e30), 0.0, rarc_gpu)
+    potential_evaporation .= ifelse.(isnan.(potential_evaporation) .| (abs.(potential_evaporation) .> fillvalue_threshold), 0.0, potential_evaporation)
+    water_storage .= ifelse.(isnan.(water_storage) .| (abs.(water_storage) .> fillvalue_threshold), 0.0, water_storage)
+    max_water_storage .= ifelse.(isnan.(max_water_storage) .| (abs.(max_water_storage) .> fillvalue_threshold), 0.0, max_water_storage)
+    aerodynamic_resistance .= ifelse.(isnan.(aerodynamic_resistance) .| (abs.(aerodynamic_resistance) .> fillvalue_threshold), 0.0, aerodynamic_resistance)
+    rarc_gpu .= ifelse.(isnan.(rarc_gpu) .| (abs.(rarc_gpu) .> fillvalue_threshold), 0.0, rarc_gpu)
 
     # Compute soil moisture for layers 1 and 2 (sum of sub-layers for layer 1)
     W_1 = sum(soil_moisture_old[:, :, 1:2, :], dims=3)  # Layer 1: sum of sub-layers 1 and 2
