@@ -249,7 +249,7 @@ function process_year(year)
                 @timeit to "tair_output"                       tair_output[:, :, day]                    = Array(tair_gpu)
                 @timeit to "precipitation_output"              precipitation_output[:, :, day]           = Array(prec_gpu)
 
-                @timeit to "Q12_processed"                     Q12_processed                             = ifelse.(abs.(Q_12) .> 1e30, NaN, Q_12)       
+                @timeit to "Q12_processed"                     Q12_processed                             = ifelse.(abs.(Q_12) .> fillvalue_threshold, NaN, Q_12)       
                 @timeit to "Q12_output"                        Q12_output[:, :, day, :]                  = Array(Q_12) 
                 @timeit to "Q12_summed_output"                 Q12_summed_output[:, :, day]              = Array(sum_with_nan_handling(cv_gpu .* Q_12, 4)) 
 
@@ -263,23 +263,23 @@ function process_year(year)
                 @timeit to "cs_array_output"                   cs_array_output[:, :, day,:]              = Array(cs_array)
 
                 ### Variables with fill-value replacement ###        
-                @timeit to "potential_evaporation_processed"          potential_evaporation_processed = ifelse.(abs.(potential_evaporation) .> 1e30, NaN, potential_evaporation)       
+                @timeit to "potential_evaporation_processed"          potential_evaporation_processed = ifelse.(abs.(potential_evaporation) .> fillvalue_threshold, NaN, potential_evaporation)       
                 @timeit to "potential_evaporation_output"             potential_evaporation_output[:, :, day, :] = Array(potential_evaporation_processed)
                 @timeit to "potential_evaporation_summed_output"      potential_evaporation_summed_output[:, :, day] = Array(sum_with_nan_handling(cv_gpu .* potential_evaporation, 4))
 
-                @timeit to "water_storage_processed"           water_storage_processed = ifelse.(abs.(water_storage) .> 1e30, NaN, water_storage)
+                @timeit to "water_storage_processed"           water_storage_processed = ifelse.(abs.(water_storage) .> fillvalue_threshold, NaN, water_storage)
                 @timeit to "water_storage_output"              water_storage_output[:, :, day, :]        = Array(water_storage_processed)
                 @timeit to "water_storage_summed_output"       water_storage_summed_output[:, :, day]    = Array(sum_with_nan_handling(water_storage_processed, 4))
 
-                @timeit to "net_radiation_processed"           net_radiation_processed = ifelse.(abs.(net_radiation) .> 1e30, NaN, net_radiation)
+                @timeit to "net_radiation_processed"           net_radiation_processed = ifelse.(abs.(net_radiation) .> fillvalue_threshold, NaN, net_radiation)
                 @timeit to "net_radiation_output"              net_radiation_output[:, :, day, :]        = Array(net_radiation_processed)
                 @timeit to "net_radiation_summed_output"       net_radiation_summed_output[:, :, day]    = Array(sum_with_nan_handling(net_radiation_processed, 4))
             
-                @timeit to "canopy_evaporation_processed"      canopy_evaporation_processed = ifelse.(abs.(canopy_evaporation) .> 1e30, NaN, canopy_evaporation)
+                @timeit to "canopy_evaporation_processed"      canopy_evaporation_processed = ifelse.(abs.(canopy_evaporation) .> fillvalue_threshold, NaN, canopy_evaporation)
                 @timeit to "canopy_evaporation_output"         canopy_evaporation_output[:, :, day, :]   = Array(canopy_evaporation_processed)
                 @timeit to "canopy_evaporation_summed_output"  canopy_evaporation_summed_output[:, :, day] = Array(sum_with_nan_handling(cv_gpu .* canopy_evaporation_processed, 4))
             
-                @timeit to "max_water_storage_processed"       max_water_storage_processed = ifelse.(abs.(max_water_storage) .> 1e30, NaN, max_water_storage)
+                @timeit to "max_water_storage_processed"       max_water_storage_processed = ifelse.(abs.(max_water_storage) .> fillvalue_threshold, NaN, max_water_storage)
                 @timeit to "max_water_storage_output"          max_water_storage_output[:, :, day, :]    = Array(max_water_storage_processed)
                 @timeit to "max_water_storage_summed_output"   max_water_storage_summed_output[:, :, day] = Array(sum_with_nan_handling(max_water_storage_processed, 4))
             end

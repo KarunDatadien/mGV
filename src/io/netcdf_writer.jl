@@ -11,9 +11,7 @@ function create_output_netcdf(output_file::String, reference_array, reference_ar
     defDim(out_ds, "top_layer", 1)
 
     # Define the output variables to be written
-    precipitation_output = defVar(out_ds, "precipitation_output", Float32, ("lon", "lat", "time"),
-                       deflatelevel = 0, # Compression done afterwards with compress_file_async
-                       chunksizes   = (64, 64, 1))
+    precipitation_output = defVar(out_ds, "precipitation_output", Float32, ("lon", "lat", "time"))
     precipitation_output.attrib["units"]       = "mm/day"
     precipitation_output.attrib["description"] = "Daily precipitation"
 
