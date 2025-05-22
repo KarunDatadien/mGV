@@ -1,7 +1,7 @@
 using .PhysicalConstants
 
 # Vapor Pressure Deficit Calculation
-function calculate_vpd(tair::CuArray{Float32}, vp::CuArray{Float32})
+function calculate_vpd(tair, vp)
     svp = svp_a .* exp.((svp_b .* tair) ./ (svp_c .+ tair)) # Tetens equation
     svp = ifelse.(tair .< 0, svp .* (1.0 .+ 0.00972 .* tair .+ 0.000042 .* tair.^2), svp) # Sub-zero correction (lower vp over ice vs. water)
     vpd = svp .- vp
@@ -9,7 +9,7 @@ function calculate_vpd(tair::CuArray{Float32}, vp::CuArray{Float32})
 end
 
 # Saturation Vapor Pressure Slope
-function calculate_svp_slope(temp::CuArray{Float32})
+function calculate_svp_slope(temp)
     return (svp_b .* svp_c) ./ ((svp_c .+ temp).^2) .* (svp_a .* exp.((svp_b .* temp) ./ (svp_c .+ temp))) .* pa_per_kpa # [Pa/°C]
 end
 

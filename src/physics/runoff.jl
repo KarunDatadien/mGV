@@ -45,7 +45,7 @@ function calculate_subsurface_runoff(soil_moisture_old, soil_moisture_max, Ds_gp
     Ws_fraction = Ws_gpu .* bottomsoil_moisture_max         # W_s * W_2^c, shape (204, 180, 1)
 
     # Initialize subsurface runoff (Q_b * Δt, assuming Δt = 1 day)
-    Q_b = CUDA.zeros(Float32, size(bottomsoil_moisture, 1), size(bottomsoil_moisture, 2), size(bottomsoil_moisture, 3))
+    Q_b = CUDA.zeros(float_type, size(bottomsoil_moisture, 1), size(bottomsoil_moisture, 2), size(bottomsoil_moisture, 3))
 
 
     # Compute subsurface runoff using ifelse for Eq. 21a and 21b

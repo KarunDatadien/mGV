@@ -6,8 +6,8 @@ function compute_aerodynamic_resistance(z2, d0_gpu, z0_gpu, K, tsurf, tair_gpu, 
     # Compute Richardson number
     # NOTE TODO:
     # - Ri_B and Fw are currently allocated as Float64.
-    # - It would be better to preallocate them at the beginning of the simulation as Float32
-    #   (assuming all other arrays are also Float32).
+    # - It would be better to preallocate them at the beginning of the simulation as float_type
+    #   (assuming all other arrays are also float_type).
     # - Then use `Fw .=` and `Ri_B .=` to overwrite their contents.
     Ri_B = ifelse.(
         tsurf .!= tair_gpu,
