@@ -1,6 +1,6 @@
-function solve_surface_temperature(tsurf, soil_temperature, albedo, Rs, RL, rh, kappa, depth_gpu, delta_t, Cs, total_et, T_a)
+function solve_surface_temperature(tsurf, soil_temperature, albedo, Rs, RL, rh, kappa, depth_gpu, delta_t, Cs, total_et, T_a, cv_gpu)
 
-    albedo = sum_with_nan_handling(albedo, 4)
+    albedo = sum_with_nan_handling(cv_gpu .* albedo, 4)
     albedo .= ifelse.(isnan.(albedo) .| (abs.(albedo) .> 1e30), 0.0, albedo)
 
     # Ensure inputs are valid (replace NaN or extreme values)
@@ -35,6 +35,8 @@ function solve_surface_temperature(tsurf, soil_temperature, albedo, Rs, RL, rh, 
 
         # Convert to Kelvin for Stefan-Boltzmann term
         Ts_new_K = Ts_new .+ 273.15
+        Ts_old_K = Ts_old .+ 273.15
+
         lhs = emissivity .* sigma .* Ts_new_K.^4 .+ common_term .* Ts_new_K
 
         # Incoming radiative and turbulent fluxes
@@ -45,10 +47,10 @@ function solve_surface_temperature(tsurf, soil_temperature, albedo, Rs, RL, rh, 
         term3 = (rho_a .* c_p_air ./ max.(rh, 1e-3)) .* T_a_K  # T_a_K in Kelvin
 
         # Latent‐heat loss via evapotranspiration
-        term4 = rho_w .* calculate_latent_heat(Ts_new) .* (total_et ./ (day_sec .* mm_in_m))
+        term4 = rho_w .* calculate_latent_heat(Ts_new_K) .* (total_et ./ (day_sec .* mm_in_m))
         
         # Heat storage change from previous time step
-        term5 = (rho_a .* c_p_air .* D1 .* Ts_old) ./ (2 * delta_t)
+        term5 = (rho_a .* c_p_air .* D1 .* Ts_old_K) ./ (2 * delta_t)
         
         # Conductive exchange with soil layers
         num   = (kappa_top .* T2_K ./ D2) .+
@@ -72,11 +74,12 @@ function solve_surface_temperature(tsurf, soil_temperature, albedo, Rs, RL, rh, 
         Tc = 647.096
         n = 0.38
         denom = Tc - Tb
+        Ts_new_K = Ts_new .+ 273.15
 
         # Derivative of latent heat using ifelse
-        ratio = (Tc .- Ts_new) ./ denom
+        ratio = (Tc .- Ts_new_K) ./ denom
         ratio = clamp.(ratio, 1e-6, 1.0)
-        L_v_deriv = ifelse.(Ts_new .< Tc,
+        L_v_deriv = ifelse.(Ts_new_K .< Tc,
                             Hvap_Tb .* n .* (ratio .^ (n - 1)) .* (-1 ./ denom),
                             0.0)
 
@@ -135,11 +138,11 @@ function estimate_layer_temperature(depth_gpu, dp_gpu, tsurf, soil_temperature, 
     topsoil_temperature = sum(soil_temperature[:, :, 1:2], dims=3) ./ 2  # Average of layers 1-2
 
     # Model layer 1 (my layers 1-2): Average of Tsurf and topsoil_temperature
-    soil_temperature[:, :, 1:1] .= 0.5 .* (tsurf .+ topsoil_temperature)
-    soil_temperature[:, :, 2:2] .= 0.5 .* (tsurf .+ topsoil_temperature)
+    soil_temperature[:, :, 1:1] = 0.5 .* (tsurf .+ topsoil_temperature)
+    soil_temperature[:, :, 2:2] = 0.5 .* (tsurf .+ topsoil_temperature)
 
     # Model layer 2 (my layer 3)
-    soil_temperature[:, :, 3:3] .= Tavg_gpu .- (dp_gpu ./ depth_gpu[:, :, 3:3]) .* 
+    soil_temperature[:, :, 3:3] = Tavg_gpu .- (dp_gpu ./ depth_gpu[:, :, 3:3]) .* 
                                    (topsoil_temperature .- Tavg_gpu) .* 
                                    (exp.(-(depth_gpu[:, :, 2:2] .+ depth_gpu[:, :, 3:3]) ./ dp_gpu) .- 
                                     exp.(-depth_gpu[:, :, 2:2] ./ dp_gpu))
