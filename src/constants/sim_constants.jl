@@ -1,9 +1,8 @@
 module SimConstants
-    export nveg, K_L, K, z2, Ri_cr, emissivity,
+    export K_L, K, z2, Ri_cr, emissivity,
            Ki, Kw, Kdry_org, Ks_org, 
            organic_frac, bulk_dens_org, soil_dens_org
 
-    const nveg = 22 # TODO: it's 14 when global
     const K_L = 0.2 # As used by Dickinson (1984) [mm]
     const K = 0.4
     const z2 = 10

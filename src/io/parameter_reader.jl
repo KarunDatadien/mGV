@@ -33,7 +33,7 @@ function read_and_allocate_parameter(varname::String)
             var_dims  # For 2D or 3D cases, keep original dimensions
         end
 
-        gpu_arr = CUDA.zeros(Float32, adjusted_dims...)  # Allocate based on adjusted dimensions
+        gpu_arr = CUDA.zeros(float_type, adjusted_dims...)  # Allocate based on adjusted dimensions
         println("Allocated GPU array of size: ", size(gpu_arr))
         return cpu_preload, gpu_arr
     else
@@ -52,7 +52,7 @@ function read_and_allocate_forcing(prefix::String, year::Int, varname::String)
     
     # 2) Conditionally allocate a GPU array
     if GPU_USE
-        gpu_arr = CUDA.zeros(Float32, size(cpu_arr, 1), size(cpu_arr, 2))
+        gpu_arr = CUDA.zeros(float_type, size(cpu_arr, 1), size(cpu_arr, 2))
         println("Allocated GPU array of size: ", size(gpu_arr))
         return cpu_preload, gpu_arr
     else

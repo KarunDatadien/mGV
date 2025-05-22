@@ -1,10 +1,6 @@
-function solve_surface_temperature(
-    tsurf::CuArray, soil_temperature, albedo::CuArray,
-    Rs::CuArray, RL::CuArray, rh::CuArray, kappa::CuArray,
-    depth_gpu, delta_t, Cs::CuArray, total_et
-)
+function solve_surface_temperature(tsurf, soil_temperature, albedo, Rs, RL, rh, kappa, depth_gpu, delta_t, Cs, total_et, T_a, cv_gpu)
 
-    albedo = sum_with_nan_handling(albedo, 4)
+    albedo = sum_with_nan_handling(cv_gpu .* albedo, 4)
     albedo .= ifelse.(isnan.(albedo) .| (abs.(albedo) .> 1e30), 0.0, albedo)
 
     # Ensure inputs are valid (replace NaN or extreme values)
@@ -12,17 +8,16 @@ function solve_surface_temperature(
     kappa .= ifelse.(isnan.(kappa) .| (abs.(kappa) .> 1e30), 0.0, kappa)
     Cs .= ifelse.(isnan.(Cs) .| (abs.(Cs) .> 1e30), 0.0, Cs)
 
-
-    T1 = soil_temperature[:, :, 2:2]
-    T2 = soil_temperature[:, :, 3:3]
+    T1_K = soil_temperature[:, :, 2:2] .+ 273.15
+    T2_K = soil_temperature[:, :, 3:3] .+ 273.15
 
     D1 = sum(depth_gpu[:, :, 1:2], dims=3) 
     D2 = depth_gpu[:,:, 3:3]
 
+    T_a_K = T_a .+ 273.15
+
     # === Compute dependent quantities ===
     latent_heat = calculate_latent_heat(tsurf) # should be with dimension W*m^-2
-
-    println("latent_heat min/max: ", minimum(latent_heat), " / ", maximum(latent_heat))
 
     # === Precompute constants ===
     kappa_top = kappa[:, :, 1]  # Select top layer (2D: nx × ny)
@@ -30,52 +25,36 @@ function solve_surface_temperature(
 
     base_term = (kappa_top ./ D2) .+ (Cs_top .* D2 ./ (2 * delta_t))
 
-    println("Shape of kappa_top: ", size(kappa_top))
-    println("Shape of Cs_top: ", size(Cs_top))
-    println("Shape of D1: ", size(D1))
-    println("Shape of D2: ", size(D2))
-    println("Shape of base_term: ", size(base_term))
-
     heat_transfer_term = base_term ./ (1 .+ (D1 ./ D2) .+ (Cs_top .* D1 .* D2 ./ (2.0 * delta_t .* kappa_top)))
     air_term = (rho_a .* c_p_air ./ max.(rh, 1e-3)) .+ (rho_a .* c_p_air .* D1 ./ (2.0 * delta_t)) # TODO: dividing by rh here is an issue (?) --> becomes infinite where rh = 0
     common_term = heat_transfer_term .+ air_term
 
 
-    #println("base_term min/max: ", minimum(base_term), " / ", maximum(base_term))
-    #println("heat_transfer_term min/max: ", minimum(heat_transfer_term), " / ", maximum(heat_transfer_term))
-    #println("air_term min/max: ", minimum(air_term), " / ", maximum(air_term))
-    #println("common_term min/max: ", minimum(common_term), " / ", maximum(common_term))
-
     # === Define the residual function f(Ts_new) = lhs - rhs ===
     function f(Ts_new, Ts_old)
-        # Debug shapes
-        println("Shape of Ts_new: ", size(Ts_new))
-        println("Shape of Ts_old: ", size(Ts_old))
-        println("Shape of albedo: ", size(albedo))
-        println("Shape of rh: ", size(rh))
-        println("Shape of total_et: ", size(total_et))
 
         # Convert to Kelvin for Stefan-Boltzmann term
         Ts_new_K = Ts_new .+ 273.15
-        lhs = emissivity .* sigma .* Ts_new_K.^4 .+ common_term .* Ts_new
-        println("Shape of lhs: ", size(lhs))
+        Ts_old_K = Ts_old .+ 273.15
+
+        lhs = emissivity .* sigma .* Ts_new_K.^4 .+ common_term .* Ts_new_K
 
         # Incoming radiative and turbulent fluxes
         term1 = (1 .- albedo) .* Rs
         term2 = emissivity .* RL
         
         # Sensible‐heat exchange with atmosphere
-        term3 = (rho_a .* c_p_air ./ max.(rh, 1e-3)) .* Ts_new
-        
+        term3 = (rho_a .* c_p_air ./ max.(rh, 1e-3)) .* T_a_K  # T_a_K in Kelvin
+
         # Latent‐heat loss via evapotranspiration
-        term4 = rho_w .* calculate_latent_heat(Ts_new) .* (total_et ./ (day_sec .* mm_in_m))
+        term4 = rho_w .* calculate_latent_heat(Ts_new_K) .* (total_et ./ (day_sec .* mm_in_m))
         
         # Heat storage change from previous time step
-        term5 = (rho_a .* c_p_air .* D1 .* Ts_old) ./ (2 * delta_t)
+        term5 = (rho_a .* c_p_air .* D1 .* Ts_old_K) ./ (2 * delta_t)
         
         # Conductive exchange with soil layers
-        num   = (kappa_top .* T2 ./ D2) .+
-                (Cs_top  .* D2 .* T1 ./ (2 * delta_t))
+        num   = (kappa_top .* T2_K ./ D2) .+
+                (Cs_top  .* D2 .* T1_K ./ (2 * delta_t))
         den   = 1 .+
                 (D1 ./ D2) .+
                 (Cs_top .* D1 .* D2 ./ (2 * delta_t .* kappa_top))
@@ -83,15 +62,6 @@ function solve_surface_temperature(
         
         # Sum everything up
         rhs = term1 .+ term2 .+ term3 .- term4 .+ term5 .+ term6
-
-        println("lhs min/max: ", minimum(lhs), " / ", maximum(lhs))
-        println("rhs min/max: ", minimum(rhs), " / ", maximum(rhs))
-        println("term1 min/max: ", minimum(term1), " / ", maximum(term1))
-        println("term2 min/max: ", minimum(term2), " / ", maximum(term2))
-        println("term3 min/max: ", minimum(term3), " / ", maximum(term3))
-        println("term4 min/max: ", minimum(term4), " / ", maximum(term4))
-        println("term5 min/max: ", minimum(term5), " / ", maximum(term5))
-        println("term6 min/max: ", minimum(term6), " / ", maximum(term6))
 
         return lhs .- rhs # TODO: fix rhs (and lhs?), rhs gives infinite values (maybe because of division by rh?)
     end
@@ -104,11 +74,12 @@ function solve_surface_temperature(
         Tc = 647.096
         n = 0.38
         denom = Tc - Tb
+        Ts_new_K = Ts_new .+ 273.15
 
         # Derivative of latent heat using ifelse
-        ratio = (Tc .- Ts_new) ./ denom
+        ratio = (Tc .- Ts_new_K) ./ denom
         ratio = clamp.(ratio, 1e-6, 1.0)
-        L_v_deriv = ifelse.(Ts_new .< Tc,
+        L_v_deriv = ifelse.(Ts_new_K .< Tc,
                             Hvap_Tb .* n .* (ratio .^ (n - 1)) .* (-1 ./ denom),
                             0.0)
 
@@ -123,14 +94,9 @@ function solve_surface_temperature(
     Ts_old = tsurf  # Initial guess on GPU
     Ts_new = tsurf
 
-    println("Shape of tsurf: ", size(tsurf))
-    println("Shape of Ts_old: ", size(Ts_old))
-    println("Shape of Ts_new: ", size(Ts_new))
+    tolerance = 1e-3
+    max_iter = 10
 
-    tolerance = 1e-6
-    max_iter = 20
-
-    println("Initial Ts_new min/max: ", minimum(Ts_new), " / ", maximum(Ts_new))
     for iter in 1:max_iter
         residual = f(Ts_new, Ts_old)
         derivative = df_dTs_new(Ts_new)
@@ -138,8 +104,6 @@ function solve_surface_temperature(
         # Newton step with per-grid-point derivative check
         delta_Ts = ifelse.(abs.(derivative) .>= 1e-10, residual ./ derivative, 0.0)
         delta_Ts = clamp.(delta_Ts, -10.0, 10.0)
-
-        println("Shape of delta_Ts: ", size(delta_Ts))
 
         # Update convergence status
         converged = abs.(delta_Ts) .< tolerance
@@ -157,8 +121,6 @@ function solve_surface_temperature(
         max_delta = maximum(abs.(delta_Ts))  # Use CUDA.maximum for CuArray
         min_delta = minimum(abs.(delta_Ts))  # Use CUDA.minimum for CuArray
         num_converged = sum(converged)  # Number of converged points
-        println("Iteration $iter: Max delta Ts = $max_delta")
-        println("Iteration $iter: Min delta Ts = $min_delta")
         println("Iteration $iter: Number of converged points = $num_converged")
         println("Iteration $iter: Ts_new min/max: ", minimum(Ts_new), " / ", maximum(Ts_new))
 
@@ -170,19 +132,17 @@ function solve_surface_temperature(
 end
 
 function estimate_layer_temperature(depth_gpu, dp_gpu, tsurf, soil_temperature, Tavg_gpu)
-    # Based on Liang et al. (1999): Modeling ground heat flux in land surface 
-    # parameterization schemes
+    # Based on Liang et al. (1999): Modeling ground heat flux in land surface parameterization schemes
 
     # Assign inputs
     topsoil_temperature = sum(soil_temperature[:, :, 1:2], dims=3) ./ 2  # Average of layers 1-2
-    # Taking Tavg_gpu as deep soil temperature
 
     # Model layer 1 (my layers 1-2): Average of Tsurf and topsoil_temperature
-    soil_temperature[:, :, 1:1] .= 0.5 .* (tsurf .+ topsoil_temperature)
-    soil_temperature[:, :, 2:2] .= 0.5 .* (tsurf .+ topsoil_temperature)
+    soil_temperature[:, :, 1:1] = 0.5 .* (tsurf .+ topsoil_temperature)
+    soil_temperature[:, :, 2:2] = 0.5 .* (tsurf .+ topsoil_temperature)
 
     # Model layer 2 (my layer 3)
-    soil_temperature[:, :, 3:3] .= Tavg_gpu .- (dp_gpu ./ depth_gpu[:, :, 3:3]) .* 
+    soil_temperature[:, :, 3:3] = Tavg_gpu .- (dp_gpu ./ depth_gpu[:, :, 3:3]) .* 
                                    (topsoil_temperature .- Tavg_gpu) .* 
                                    (exp.(-(depth_gpu[:, :, 2:2] .+ depth_gpu[:, :, 3:3]) ./ dp_gpu) .- 
                                     exp.(-depth_gpu[:, :, 2:2] ./ dp_gpu))
