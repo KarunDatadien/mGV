@@ -10,7 +10,7 @@ println("Loading parameter data and allocating memory...")
     (albedo_cpu,     albedo_gpu)     = read_and_allocate_parameter(albedo_var) 
     (rmin_cpu,       rmin_gpu)       = read_and_allocate_parameter(rmin_var) 
     (rarc_cpu,       rarc_gpu)       = read_and_allocate_parameter(rarc_var) 
-    (cv_cpu,         cv_gpu)       = read_and_allocate_parameter(cv_var) 
+    (cv_cpu,         cv_gpu)         = read_and_allocate_parameter(cv_var) 
     (elev_cpu,       elev_gpu)       = read_and_allocate_parameter(elev_var) 
     (ksat_cpu,       ksat_gpu)       = read_and_allocate_parameter(ksat_var) 
     (residmoist_cpu, residmoist_gpu) = read_and_allocate_parameter(residmoist_var) 
@@ -46,21 +46,19 @@ gpu_load_static_inputs([rmin_cpu, rarc_cpu, cv_cpu, elev_cpu, ksat_cpu, residmoi
 reshape_static_inputs!()
 
 # === Initial States ===
-global water_storage = CUDA.fill(Float32(0.0), size(coverage_gpu))  # Fill with 0.1 on GPU
-global throughfall   = CUDA.zeros(Float32, size(coverage_gpu))      # Allocate zeros on GPU
-global bulk_dens_min = CUDA.zeros(Float32, size(bulk_dens_gpu))
-global soil_dens_min = CUDA.zeros(Float32, size(bulk_dens_gpu))
-global porosity      = CUDA.zeros(Float32, size(bulk_dens_gpu))
-global soil_temperature = CUDA.zeros(Float32, size(soil_dens_gpu))
-global Lsum = CUDA.zeros(Float32, size(soil_dens_gpu))
+global water_storage = CUDA.fill(float_type(0.0), size(coverage_gpu))  # Fill with 0.0 on GPU
+global throughfall   = CUDA.zeros(float_type, size(coverage_gpu))      # Allocate zeros on GPU
+global bulk_dens_min = CUDA.zeros(float_type, size(bulk_dens_gpu))
+global soil_dens_min = CUDA.zeros(float_type, size(bulk_dens_gpu))
+global porosity      = CUDA.zeros(float_type, size(bulk_dens_gpu))
+global soil_temperature = CUDA.zeros(float_type, size(soil_dens_gpu))
+global Lsum = CUDA.zeros(float_type, size(soil_dens_gpu))
 global tsurf = CUDA.zeros(Float64, size(d0_gpu))
 global tsurf_n = CUDA.zeros(Float64, size(albedo_gpu))
 
-global soil_moisture_old = CUDA.zeros(Float32, size(soil_dens_gpu, 1), size(soil_dens_gpu, 2), size(soil_dens_gpu, 3), size(coverage_gpu, 4))
-global soil_moisture_new = CUDA.zeros(Float32, size(soil_dens_gpu, 1), size(soil_dens_gpu, 2), size(soil_dens_gpu, 3), size(coverage_gpu, 4))
-global soil_moisture_max = CUDA.zeros(Float32, size(soil_dens_gpu, 1), size(soil_dens_gpu, 2), size(soil_dens_gpu, 3), size(coverage_gpu, 4))
-
-
+global soil_moisture_old = CUDA.zeros(float_type, size(soil_dens_gpu, 1), size(soil_dens_gpu, 2), size(soil_dens_gpu, 3), size(coverage_gpu, 4))
+global soil_moisture_new = CUDA.zeros(float_type, size(soil_dens_gpu, 1), size(soil_dens_gpu, 2), size(soil_dens_gpu, 3), size(coverage_gpu, 4))
+global soil_moisture_max = CUDA.zeros(float_type, size(soil_dens_gpu, 1), size(soil_dens_gpu, 2), size(soil_dens_gpu, 3), size(coverage_gpu, 4))
 
 soil_temperature[:, :, 1:1] .= Tavg_gpu
 soil_temperature[:, :, 2:2] .= Tavg_gpu
@@ -91,6 +89,7 @@ function process_year(year)
         (swdown_cpu, swdown_gpu)  = read_and_allocate_forcing(input_swdown_prefix,  year, swdown_var)
         (lwdown_cpu, lwdown_gpu)  = read_and_allocate_forcing(input_lwdown_prefix,  year, lwdown_var)
     end
+    CUDA.synchronize()
 
     println("Opening output file...")
     output_file = joinpath(output_dir, "$(output_file_prefix)$(year).nc")
@@ -102,7 +101,9 @@ function process_year(year)
           net_radiation_summed_output, max_water_storage_output, max_water_storage_summed_output,
           soil_evaporation_output, soil_temperature_output, soil_moisture_output, total_et_output, total_runoff_output, 
           kappa_array_output, cs_array_output =
-          create_output_netcdf(output_file, prec_cpu, LAI_cpu)
+          create_output_netcdf(output_file, prec_cpu, LAI_cpu, float_type)
+
+    CUDA.synchronize()
 
     println("Running...") 
     num_days = size(prec_cpu, 3)
@@ -122,8 +123,12 @@ function process_year(year)
             @timeit to "gpu_load_daily_inputs" gpu_load_daily_inputs(day, day_prev, 
                                   [prec_cpu, tair_cpu, wind_cpu, vp_cpu, swdown_cpu, lwdown_cpu], 
                                   [prec_gpu, tair_gpu, wind_gpu, vp_gpu, swdown_gpu, lwdown_gpu])
-                                  
-                                
+
+            CUDA.synchronize()
+
+            prec_value = Array(prec_gpu[27:27, 30:30])[1, 1]
+            println("Day $day: prec_gpu[27, 30] = $prec_value")
+
             # For the first timestep we set tsurf = tair (see page 14,421 of Liang et al. (1994)):
             if day == 1 && year == start_year 
                 tsurf = tair_gpu 
@@ -206,15 +211,16 @@ function process_year(year)
                     tsurf,          # Surface temperature (CuArray)
                     soil_temperature,    # Soil layer 1 temperature (CuArray) 
                     albedo_gpu,        # Surface albedo (CuArray)
-                    swdown_gpu,   # Rs: shortwave radiation (Float32)
-                    lwdown_gpu,   # RL: longwave radiation (Float32)
-                    sum_with_nan_handling(aerodynamic_resistance, 4), # Aerodynamic resistance 
+                    swdown_gpu,   # Rs: shortwave radiation (float_type)
+                    lwdown_gpu,   # RL: longwave radiation (float_type)
+                    sum_with_nan_handling(cv_gpu .* aerodynamic_resistance, 4), # Aerodynamic resistance 
                     kappa_array,         # Thermal conductivity 
                     depth_gpu,             
                     day_sec,               # TODO: should be 1 instead of day_sec? (time step in seconds -> 1 day in s)
                     cs_array,
                     total_et,
-                    tair_gpu
+                    tair_gpu,
+                    cv_gpu
                 ) 
 
                 println("INIT TEMPERATURE")
@@ -233,20 +239,21 @@ function process_year(year)
                 tsurf,          # Surface temperature (CuArray)
                 soil_temperature,    # Soil layer 1 temperature (CuArray) 
                 albedo_gpu,        # Surface albedo (CuArray)
-                swdown_gpu,   # Rs: shortwave radiation (Float32)
-                lwdown_gpu,   # RL: longwave radiation (Float32)
-                sum_with_nan_handling(aerodynamic_resistance, 4), # Aerodynamic resistance (CuArray)
+                swdown_gpu,   # Rs: shortwave radiation (float_type)
+                lwdown_gpu,   # RL: longwave radiation (float_type)
+                sum_with_nan_handling(cv_gpu .* aerodynamic_resistance, 4), # Aerodynamic resistance (CuArray)
                 kappa_array,         # Thermal conductivity (CuArray)
                 depth_gpu,             
                 day_sec,               # TODO: should be 1 instead of day_sec? (time step in seconds -> 1 day in s)
                 cs_array,
                 total_et,
-                tair_gpu
+                tair_gpu,
+                cv_gpu
             ) 
             println("NEW TEMPERATURE CALCULATED")
 
 
-
+            CUDA.synchronize()
 
             @timeit to "outputs" begin
                 ### Variables without fill-value replacement ###
@@ -258,6 +265,7 @@ function process_year(year)
                 @timeit to "transpiration_output"              transpiration_output[:, :, day, :]        = Array(transpiration)
                 @timeit to "transpiration_summed_output"       transpiration_summed_output[:, :, day]    = Array(sum_with_nan_handling(cv_gpu .* transpiration, 4))
                 @timeit to "tair_output"                       tair_output[:, :, day]                    = Array(tair_gpu)
+
                 @timeit to "precipitation_output"              precipitation_output[:, :, day]           = Array(prec_gpu)
 
                 @timeit to "Q12_processed"                     Q12_processed                             = ifelse.(abs.(Q_12) .> fillvalue_threshold, NaN, Q_12)       
@@ -284,7 +292,7 @@ function process_year(year)
 
                 @timeit to "net_radiation_processed"           net_radiation_processed = ifelse.(abs.(net_radiation) .> fillvalue_threshold, NaN, net_radiation)
                 @timeit to "net_radiation_output"              net_radiation_output[:, :, day, :]        = Array(net_radiation_processed)
-                @timeit to "net_radiation_summed_output"       net_radiation_summed_output[:, :, day]    = Array(sum_with_nan_handling(net_radiation_processed, 4))
+                @timeit to "net_radiation_summed_output"       net_radiation_summed_output[:, :, day]    = Array(sum_with_nan_handling(cv_gpu .* net_radiation_processed, 4))
             
                 @timeit to "canopy_evaporation_processed"      canopy_evaporation_processed = ifelse.(abs.(canopy_evaporation) .> fillvalue_threshold, NaN, canopy_evaporation)
                 @timeit to "canopy_evaporation_output"         canopy_evaporation_output[:, :, day, :]   = Array(canopy_evaporation_processed)

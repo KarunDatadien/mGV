@@ -1,6 +1,9 @@
 CASE, start_year_arg, end_year_arg = parse_case_args()
 check_and_set_gpu_usage()
 
+# Choose Float64 or Float32 for operations and output
+global float_type = Float32
+
 # Load the configuration matching the input argument:
 if CASE == "global"
 
