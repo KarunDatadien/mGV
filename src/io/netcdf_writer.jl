@@ -129,12 +129,24 @@ function create_output_netcdf(output_file::String, reference_array, reference_ar
     kappa_array_output = defVar(out_ds, "kappa_array_output", float_type, ("lon", "lat", "time", "layer"))
     cs_array_output = defVar(out_ds, "cs_array_output", float_type, ("lon", "lat", "time", "layer"))
 
+    wilting_point_output = defVar(out_ds, "wilting_point_output", float_type, ("lon", "lat", "layer"))
+    soil_moisture_max_output = defVar(out_ds, "soil_moisture_max_output", float_type, ("lon", "lat", "layer", "nveg"))
+    soil_moisture_critical_output = defVar(out_ds, "soil_moisture_critical_output", float_type, ("lon", "lat", "layer"))
+
+    E_1_t_output = defVar(out_ds, "E_1_t_output", float_type, ("lon", "lat", "time", "nveg"))
+    E_2_t_output = defVar(out_ds, "E_2_t_output", float_type, ("lon", "lat", "time", "nveg"))
+    g_sw_1_output = defVar(out_ds, "g_sw_1_output", float_type, ("lon", "lat", "time", "nveg"))
+    g_sw_2_output = defVar(out_ds, "g_sw_2_output", float_type, ("lon", "lat", "time", "nveg"))
+    g_sw_output = defVar(out_ds, "g_sw_output", float_type, ("lon", "lat", "time", "nveg"))
+
+
     return out_ds, precipitation_output, water_storage_output, water_storage_summed_output, Q12_output, Q12_summed_output,
            tair_output, tsurf_output, canopy_evaporation_output,
            canopy_evaporation_summed_output, transpiration_output, transpiration_summed_output, aerodynamic_resistance_output, aerodynamic_resistance_summed_output,
            potential_evaporation_output, potential_evaporation_summed_output, net_radiation_output,
            net_radiation_summed_output, max_water_storage_output, max_water_storage_summed_output,
            soil_evaporation_output, soil_temperature_output, soil_moisture_output,  total_et_output, total_runoff_output,
-           kappa_array_output, cs_array_output
+           kappa_array_output, cs_array_output, wilting_point_output, soil_moisture_max_output, soil_moisture_critical_output,
+           E_1_t_output, E_2_t_output, g_sw_1_output, g_sw_2_output, g_sw_output
 
 end
