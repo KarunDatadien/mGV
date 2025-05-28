@@ -75,7 +75,7 @@ function update_topsoil_moisture(prec_gpu, throughfall, soil_moisture_old, soil_
     topsoil_moisture_max = sum(soil_moisture_max[:, :, 1:2, :], dims=3)  # W_1^c
 
     # Compute updated soil moisture for vegetated layers (n = 1 to nveg) using throughfall
-    topsoil_moisture_new_veg = (throughfall[:, :, :, 1:end-1] .- surface_runoff[:, :, :, 1:end-1] .- Q_12[:, :, :, 1:end-1] .- E_1_t[:, :, :, 1:end-1])
+    topsoil_moisture_new_veg = (throughfall[:, :, :, 1:end-1] .- surface_runoff[:, :, :, 1:end-1] ) .- Q_12[:, :, :, 1:end-1]  .- E_1_t[:, :, :, 1:end-1] 
 
     # Compute updated soil moisture for bare soil layer (n = nveg+1) using prec_gpu
     topsoil_moisture_new_bare = (prec_gpu .- surface_runoff[:, :, :, end:end] .- Q_12[:, :, :, end:end] .- soil_evaporation)
@@ -102,24 +102,26 @@ function update_topsoil_moisture(prec_gpu, throughfall, soil_moisture_old, soil_
 end
 
 
-function calculate_drainage_Q12(soil_moisture_old, soil_moisture_max, ksat_gpu, resid_moist, B_p)
+function calculate_drainage_Q12(soil_moisture_old, soil_moisture_max, ksat_gpu, residual_moisture, expt_gpu)
+    # TODO: check if this function is correct, gives different results from VIC-c
+
     # Compute drainage for each sub-layer (layers 1 and 2) for all n
     sublayer_moisture = soil_moisture_old[:, :, 1:2, :]  
     sublayer_moisture_max = soil_moisture_max[:, :, 1:2, :]  
-    K_s = ksat_gpu[:, :, 1:2] 
-    theta_r = resid_moist[:, :, 1:2] 
-    B_p_sublayer = B_p[:, :, 1:2]  
+    K_s = ksat_gpu[:, :, 1:2] # [mm/day]
+    theta_r = residual_moisture[:, :, 1:2] 
+    expt_sublayer = expt_gpu[:, :, 1:2]  
 
     # Compute the drainage ratio for each sub-layer: (W_1[n] - theta_r) / (W_1^c - theta_r)
     drainage_ratio = (sublayer_moisture .- theta_r) ./ (sublayer_moisture_max .- theta_r)
     drainage_ratio = max.(drainage_ratio, 0.0)  # Ensure non-negative
 
     # Compute Q_12 for each sub-layer using Eq. 20: K_s * (drainage_ratio)^((2/B_p) + 3)
-    Q_12_sublayer = K_s .* drainage_ratio .^ ((2.0 ./ B_p_sublayer) .+ 3.0)
+    Q_12_sublayer = K_s .* drainage_ratio .^ (expt_sublayer)
     Q_12_sublayer = max.(Q_12_sublayer, 0.0)
 
     # Sum the contributions from the two sub-layers for each n
-    Q_12 = sum(Q_12_sublayer, dims=3)  
+    Q_12 = sum(Q_12_sublayer, dims=3)
 
     return Q_12
 end
