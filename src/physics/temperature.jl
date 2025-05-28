@@ -8,13 +8,17 @@ function solve_surface_temperature(tsurf, soil_temperature, albedo, Rs, RL, rh, 
     kappa .= ifelse.(isnan.(kappa) .| (abs.(kappa) .> 1e30), 0.0, kappa)
     Cs .= ifelse.(isnan.(Cs) .| (abs.(Cs) .> 1e30), 0.0, Cs)
 
-    T1_K = soil_temperature[:, :, 2:2] .+ 273.15
+    T1_K = soil_temperature[:, :, 2:2] .+ 273.15 # TODO: should be average of layer 1 and 2?
     T2_K = soil_temperature[:, :, 3:3] .+ 273.15
+
+    T1_K .= ifelse.(isnan.(T1_K) .| (abs.(T1_K) .> 1e15), 0.0, T1_K)
+    T2_K .= ifelse.(isnan.(T2_K) .| (abs.(T2_K) .> 1e15), 0.0, T2_K)
 
     D1 = sum(depth_gpu[:, :, 1:2], dims=3) 
     D2 = depth_gpu[:,:, 3:3]
 
     T_a_K = T_a .+ 273.15
+    T_a_K .= ifelse.(isnan.(T_a_K) .| (abs.(T_a_K) .> 1e15), 0.0, T_a_K)
 
     # === Compute dependent quantities ===
     latent_heat = calculate_latent_heat(tsurf) # should be with dimension W*m^-2
@@ -115,7 +119,7 @@ function solve_surface_temperature(tsurf, soil_temperature, albedo, Rs, RL, rh, 
         # Update Ts_new only for non-converged points
         delta_Ts = ifelse.(converged, 0.0, delta_Ts)
         Ts_new = Ts_new .- delta_Ts
-        Ts_new = clamp.(Ts_new, -100.0, 100.0)  # Prevent unphysical temperatures
+        Ts_new = clamp.(Ts_new, -100.0, 100)  # Prevent unphysical temperatures
 
         # Log max/min delta for monitoring
         max_delta = maximum(abs.(delta_Ts))  # Use CUDA.maximum for CuArray
@@ -127,6 +131,8 @@ function solve_surface_temperature(tsurf, soil_temperature, albedo, Rs, RL, rh, 
         # Update Ts_old for next iteration
         Ts_old = Ts_new
     end
+
+    Ts_new = ifelse.( (Ts_new .== -100.0) .| (Ts_new .== 100.0), 0.0, Ts_new)  # Add this line
 
     return Ts_new
 end
