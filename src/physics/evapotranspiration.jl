@@ -1,7 +1,12 @@
-function compute_aerodynamic_resistance(z2, d0_gpu, z0_gpu, K, tsurf, tair_gpu, wind_gpu)
+function compute_aerodynamic_resistance(z2, d0_gpu, z0_gpu, z0soil_gpu, tsurf, tair_gpu, wind_gpu, cv_gpu)    
+    roughness = CUDA.zeros(float_type, size(cv_gpu))
+
+    roughness[:, :, :, 1:end-1] = z0_gpu[:, :, :, 1:end-1] .* cv_gpu[:, :, :, 1:end-1]
+    roughness[:, :, :, end:end] = z0soil_gpu .* cv_gpu[:, :, :, end:end]
+
     # Compute a²[n] and c
-    a_squared = (K^2) ./ (log.((z2 .- d0_gpu) ./ z0_gpu).^2)
-    c_coefficient = 49.82 .* a_squared .* sqrt.((z2 .- d0_gpu) ./ z0_gpu)
+    a_squared = (K^2) ./ (log.((z2 .- d0_gpu) ./ roughness).^2)
+    c_coefficient = 49.82 .* a_squared .* sqrt.((z2 .- d0_gpu) ./ roughness)
     
     # Compute Richardson number
     # NOTE TODO:
@@ -40,7 +45,7 @@ function calculate_net_radiation(swdown_gpu, lwdown_gpu, albedo_gpu, tsurf)
     return (1.0 .- albedo_gpu) .* swdown_gpu .+ emissivity .* (lwdown_gpu .- sigma .* (tsurf .+ 273.15).^4)
 end
 
-function calculate_potential_evaporation(tair_gpu, vp_gpu, elev_gpu, net_radiation, aerodynamic_resistance, rarc_gpu)
+function calculate_potential_evaporation(tair_gpu, vp_gpu, elev_gpu, net_radiation, aerodynamic_resistance, rarc_gpu, rmin_gpu, LAI_gpu)
     # Compute intermediate variables
     vpd           = max.(calculate_vpd(tair_gpu, vp_gpu), 0.0)  # [Pa], ensure non-negative
     slope         = calculate_svp_slope(tair_gpu) # [Pa/°C]
@@ -50,14 +55,25 @@ function calculate_potential_evaporation(tair_gpu, vp_gpu, elev_gpu, net_radiati
     psychrometric_constant = 1628.6 .* surface_pressure ./ latent_heat # [Pa/K]
     air_density = 0.003486 .* surface_pressure ./ (273.15 .+ tair_gpu) # [kg/m^3]
 
-    # Penman-Monteith equation (mm/day) with canopy resistance set to zero
+    rc = rmin_gpu ./ LAI_gpu # TODO: should be done more exactly with a gsm_inv value
+
+    # Penman-Monteith equation (mm/day) with canopy resistance set to rc
     numerator = slope .* (net_radiation .* day_sec) .+ (air_density .* c_p_air .* vpd .* day_sec ./ aerodynamic_resistance)
-    denominator = latent_heat .* (slope .+ psychrometric_constant .* (1 .+ (rarc_gpu) ./ aerodynamic_resistance))
+    denominator = latent_heat .* (slope .+ psychrometric_constant .* (1 .+ (rc .+ rarc_gpu) ./ aerodynamic_resistance))
     potential_evaporation = (numerator ./ denominator)  # kg/m^2/day = [mm/day]
+
+    # Add bare soil potential evaporation
+    SOIL_RARC = 100. # TODO: is this ok? taken from VIC
+    aerodynamic_resistance_soil = aerodynamic_resistance # TODO: replace this value
+    numerator_soil = slope .* (net_radiation .* day_sec) .+ (air_density .* c_p_air .* vpd .* day_sec ./ aerodynamic_resistance_soil)
+    denominator_soil = latent_heat .* (slope .+ psychrometric_constant .* (1 .+ SOIL_RARC ./ aerodynamic_resistance_soil)) # rc = 0 for bare soil
+    potential_evaporation_soil = (numerator_soil ./ denominator_soil)
+    potential_evaporation[:, :, :, end:end] = potential_evaporation_soil[:, :, :, end:end]
 
     # Ensure potential evaporation is non-negative
     potential_evaporation = max.(potential_evaporation, 0.0)
-    
+    println("Shape of potential_evaporation: $(size(potential_evaporation))")
+
     return potential_evaporation # [mm/day]
 end
 
@@ -95,6 +111,10 @@ function calculate_transpiration(
     soil_moisture_critical::CuArray, wilting_point::CuArray, root_gpu::CuArray, 
     rmin_gpu::CuArray, LAI_gpu::CuArray
 )
+    # Constants
+    delta_t = 1  # seconds per day
+   # fillvalue_threshold = 1e9
+
     # Replace NaN or large values with 0.0
     potential_evaporation .= ifelse.(isnan.(potential_evaporation) .| (abs.(potential_evaporation) .> fillvalue_threshold), 0.0, potential_evaporation)
     water_storage .= ifelse.(isnan.(water_storage) .| (abs.(water_storage) .> fillvalue_threshold), 0.0, water_storage)
@@ -102,62 +122,82 @@ function calculate_transpiration(
     aerodynamic_resistance .= ifelse.(isnan.(aerodynamic_resistance) .| (abs.(aerodynamic_resistance) .> fillvalue_threshold), 0.0, aerodynamic_resistance)
     rarc_gpu .= ifelse.(isnan.(rarc_gpu) .| (abs.(rarc_gpu) .> fillvalue_threshold), 0.0, rarc_gpu)
 
-    # Compute soil moisture for layers 1 and 2 (sum of sub-layers for layer 1)
-    W_1 = sum(soil_moisture_old[:, :, 1:2, :], dims=3)  # Layer 1: sum of sub-layers 1 and 2
-    W_2 = soil_moisture_old[:, :, 3:3, :]  # Layer 2: third sub-layer
+    # Compute soil moisture for layers 1 and 2
+    W_1 = sum(soil_moisture_old[:, :, 1:2, :], dims=3)
+    W_2 = soil_moisture_old[:, :, 3:3, :]
 
-    # Extract critical and wilting point values for layers 1 and 2
+    # Critical and wilting points for layers
     W_1_cr = sum(soil_moisture_critical[:, :, 1:2, :], dims=3)
     W_2_cr = soil_moisture_critical[:, :, 3:3, :]
     W_1_star = sum(wilting_point[:, :, 1:2, :], dims=3)
     W_2_star = wilting_point[:, :, 3:3, :]
 
-    # Compute soil moisture stress factor g_sw^{-1} for each layer (Eq. 7)
-    g_sw_inv_1 = ifelse.(W_1 .>= W_1_cr, 1.0,
-                        ifelse.(W_1 .< W_1_star, 0.0,
-                                (W_1 .- W_1_star) ./ (W_1_cr .- W_1_star)))
-    g_sw_inv_2 = ifelse.(W_2 .>= W_2_cr, 1.0,
-                        ifelse.(W_2 .< W_2_star, 0.0,
-                                (W_2 .- W_2_star) ./ (W_2_cr .- W_2_star)))
+    # Root fractions
+    f_1 = sum(root_gpu[:, :, 1:2, :], dims=3)
+    f_2 = root_gpu[:, :, 3:3, :]
 
-    # Invert to get g_sw
-    g_sw_1 = 1.0 ./ max.(g_sw_inv_1, 1e-6)  # Avoid division by zero
-    g_sw_2 = 1.0 ./ max.(g_sw_inv_2, 1e-6)
+    # Normalize root fractions
+    f_sum = f_1 .+ f_2 
+    f_1_normalized = f_1 ./ f_sum
+    f_2_normalized = f_2 ./ f_sum
 
-    # Compute canopy resistance for each layer (Eq. 6)
-    canopy_resistance_1 = (rmin_gpu .* g_sw_1) ./ LAI_gpu
-    canopy_resistance_2 = (rmin_gpu .* g_sw_2) ./ LAI_gpu
+    # Soil moisture stress factors
+    g_sw_1 = ifelse.(W_1 .>= W_1_cr, 1.0,
+                     ifelse.(W_1 .< W_1_star, 0.0,
+                             (W_1 .- W_1_star) ./ (W_1_cr .- W_1_star)))
+    g_sw_2 = ifelse.(W_2 .>= W_2_cr, 1.0,
+                     ifelse.(W_2 .< W_2_star, 0.0,
+                             (W_2 .- W_2_star) ./ (W_2_cr .- W_2_star)))
 
-    # Compute total transpiration E_t[n] (Eq. 5)
+    # Weighted average stress factor
+    g_sw = (f_1_normalized .* g_sw_1 .+ f_2_normalized .* g_sw_2) ./ (f_1_normalized .+ f_2_normalized)
+    g_sw = clamp.(ifelse.(isnan.(g_sw), 0.0, g_sw), 0.0, 1.0)
+
+    # Canopy resistance
+    canopy_resistance_1 = ifelse.(LAI_gpu .== 0.0, 0.0, (rmin_gpu .* g_sw) ./ LAI_gpu)
+
+    # Dry fraction
+    dryFrac = ifelse.(max_water_storage .== 0.0, 0.0,
+                      1.0 .- (water_storage ./ max_water_storage) .^ (2/3))
+
+    # Total transpiration (mm/s to mm/day)
     transpiration = ifelse.(max_water_storage .== 0.0, 0.0, 
-                           (1.0 .- (water_storage ./ max_water_storage) .^ (2/3)) .*
-                           potential_evaporation .* 
+                           dryFrac .* potential_evaporation .* 
                            (aerodynamic_resistance ./ (aerodynamic_resistance .+ rarc_gpu .+ canopy_resistance_1)))
+    transpiration = max.(transpiration, 0.0) .* delta_t
+
+    # Distribute transpiration
+    E_1_t = transpiration .* f_1_normalized
+    E_2_t = transpiration .* f_2_normalized
+
+    # Scaling factors
+    scaling_1 = ifelse.(W_1 .>= W_1_cr, 1.0, max.(0.0, (W_1 .- W_1_star) ./ (W_1_cr .- W_1_star)))
+    scaling_2 = ifelse.(W_2 .>= W_2_cr, 1.0, max.(0.0, (W_2 .- W_2_star) ./ (W_2_cr .- W_2_star)))
+
+    # Temporary transpiration
+    E_1_t_temp = E_1_t .* scaling_1
+    E_2_t_temp = E_2_t .* scaling_2
+
+    # Spare transpiration
+    spare_transp = E_1_t .* (1.0 .- scaling_1) + E_2_t .* (1.0 .- scaling_2)
+
+    # Updated root sum
+    root_sum_updated = f_1_normalized .* (W_1 .>= W_1_cr) + f_2_normalized .* (W_2 .>= W_2_cr)
+
+    # Reallocation factor
+    realloc_factor = ifelse.(root_sum_updated .> 0.0, spare_transp ./ root_sum_updated, 0.0)
+
+    # Final transpiration per layer
+    E_1_t = E_1_t_temp + (W_1 .>= W_1_cr) .* f_1_normalized .* realloc_factor
+    E_2_t = E_2_t_temp + (W_2 .>= W_2_cr) .* f_2_normalized .* realloc_factor
+
+    # Final total transpiration
+    transpiration = E_1_t + E_2_t
     transpiration = max.(transpiration, 0.0)
-
-    # Extract root fractions
-    f_1 = root_gpu[:, :, 1:1, :]  # Fraction of roots in layer 1
-    f_2 = root_gpu[:, :, 2:2, :]  # Fraction of roots in layer 2
-
-    # Check conditions for transpiration supply
-    E_1_t = zeros(size(transpiration))
-    E_2_t = zeros(size(transpiration))
-
-    # Case 1: W_2[n] >= W_2^cr and f_2[n] >= 0.5, transpiration from layer 2 only
-    # Case 2: W_1[n] >= W_1^cr and f_1[n] >= 0.5, transpiration from layer 1 only
-    # Otherwise: Split based on root fractions
-    E_1_t = ifelse.((W_2 .>= W_2_cr) .& (f_2 .>= 0.5), 0.0,
-                    ifelse.((W_1 .>= W_1_cr) .& (f_1 .>= 0.5), transpiration,
-                            transpiration .* f_1 ./ (f_1 .+ f_2 .+ 1e-6)))
-    E_2_t = ifelse.((W_2 .>= W_2_cr) .& (f_2 .>= 0.5), transpiration,
-                    ifelse.((W_1 .>= W_1_cr) .& (f_1 .>= 0.5), 0.0,
-                            transpiration .* f_2 ./ (f_1 .+ f_2 .+ 1e-6)))
-
-    # Ensure non-negative values
     E_1_t = max.(E_1_t, 0.0)
     E_2_t = max.(E_2_t, 0.0)
 
-    return transpiration, E_1_t, E_2_t
+    return transpiration, E_1_t, E_2_t, g_sw_1, g_sw_2, g_sw
 end
 
 
