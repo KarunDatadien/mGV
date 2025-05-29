@@ -106,8 +106,8 @@ function calculate_drainage_Q12(soil_moisture_old, soil_moisture_max, ksat_gpu, 
     # TODO: check if this function is correct, gives different results from VIC-c
 
     # Compute drainage for each sub-layer (layers 1 and 2) for all n
-    sublayer_moisture = soil_moisture_old[:, :, 1:2, :]  
-    sublayer_moisture_max = soil_moisture_max[:, :, 1:2, :]  
+    sublayer_moisture = sum_with_nan_handling(soil_moisture_old[:, :, 1:2, :], 4) 
+    sublayer_moisture_max = sum_with_nan_handling(soil_moisture_max[:, :, 1:2, :], 4) 
     K_s = ksat_gpu[:, :, 1:2] # [mm/day]
     theta_r = residual_moisture[:, :, 1:2] 
     expt_sublayer = expt_gpu[:, :, 1:2]  

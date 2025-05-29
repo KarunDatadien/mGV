@@ -77,13 +77,13 @@ function calculate_potential_evaporation(tair_gpu, vp_gpu, elev_gpu, net_radiati
     return potential_evaporation # [mm/day]
 end
 
-function calculate_max_water_storage(LAI_gpu)
+function calculate_max_water_storage(LAI_gpu, cv_gpu)
     # Compute maximum water intercepted/stored in the canopy cover
-    result = K_L .* LAI_gpu
+    result = K_L .* LAI_gpu .* cv_gpu #TODO should we multiply by .* cv_gpu ?
     return ifelse.(isnan.(result) .| (abs.(result) .> fillvalue_threshold), 0.0, result)
 end
 
-function calculate_canopy_evaporation(water_storage, max_water_storage, potential_evaporation, aerodynamic_resistance, rarc, prec_gpu)
+function calculate_canopy_evaporation(water_storage, max_water_storage, potential_evaporation, aerodynamic_resistance, rarc, prec_gpu, cv_gpu)
 
     potential_evaporation .= ifelse.(isnan.(potential_evaporation) .| (abs.(potential_evaporation) .> fillvalue_threshold), 0.0, potential_evaporation)
     water_storage .= ifelse.(isnan.(water_storage) .| (abs.(water_storage) .> fillvalue_threshold), 0.0, water_storage)
@@ -96,7 +96,7 @@ function calculate_canopy_evaporation(water_storage, max_water_storage, potentia
                               (aerodynamic_resistance ./ (aerodynamic_resistance .+ rarc))
 
     # Ensure canopy evaporation fraction (f_n) is bounded between 0 and 1
-    f_n = min.(1.0, (water_storage .+ prec_gpu) ./ canopy_evaporation_star)
+    f_n = min.(1.0, (water_storage .+ prec_gpu .* cv_gpu) ./ canopy_evaporation_star)
 
     # Compute actual canopy evaporation
     canopy_evaporation = f_n .* canopy_evaporation_star
@@ -109,7 +109,7 @@ function calculate_transpiration(
     potential_evaporation::CuArray, aerodynamic_resistance::CuArray, rarc_gpu::CuArray,  
     water_storage::CuArray, max_water_storage::CuArray, soil_moisture_old::CuArray, 
     soil_moisture_critical::CuArray, wilting_point::CuArray, root_gpu::CuArray, 
-    rmin_gpu::CuArray, LAI_gpu::CuArray
+    rmin_gpu::CuArray, LAI_gpu::CuArray, cv_gpu
 )
     # Constants
     delta_t = 1  # seconds per day
@@ -153,8 +153,24 @@ function calculate_transpiration(
     g_sw = (f_1_normalized .* g_sw_1 .+ f_2_normalized .* g_sw_2) ./ (f_1_normalized .+ f_2_normalized)
     g_sw = clamp.(ifelse.(isnan.(g_sw), 0.0, g_sw), 0.0, 1.0)
 
+    # A large resistance value to represent a closed canopy
+    HUGE_R = 1e6
+
+    # compute “both‐layers‐unstressed” mask
+    both_ok = (W_1 .>= W_1_cr) .& (W_2 .>= W_2_cr)
+    
+    # use g_sw_case=1 where both layers are above crit; else keep your normal g_sw
+    g_sw_case = ifelse.(both_ok, 1.0, g_sw)
+    
+    # now canopy resistance in pure ifelse style:
+    canopy_resistance_1 = ifelse.(
+        (LAI_gpu .<= 0.0) .| (g_sw_case .<= 0.0),  # no LAI or still totally dry
+        HUGE_R,                                   # fully shut
+        rmin_gpu ./(LAI_gpu .* cv_gpu .* g_sw_case)        # Jarvis rmin/(LAI⋅g_sw_case)
+    )
+
     # Canopy resistance
-    canopy_resistance_1 = ifelse.(LAI_gpu .== 0.0, 0.0, (rmin_gpu .* g_sw) ./ LAI_gpu)
+#    canopy_resistance_1 = ifelse.(LAI_gpu .== 0.0, 0.0, (rmin_gpu .* g_sw) ./ LAI_gpu)
 
     # Dry fraction
     dryFrac = ifelse.(max_water_storage .== 0.0, 0.0,
@@ -212,11 +228,12 @@ function calculate_soil_evaporation(soil_moisture, soil_moisture_max, potential_
     # Compute the unsaturated area fraction
     x = 1.0 .- A_sat
 
-    # Approximate the series expansion from eq. (15) using the first four terms
-    S_series = 1.0 .+
-               (b_i ./ (1.0 .+ b_i)) .* x .^ (1.0 ./ b_i) .+
-               (b_i ./ (2.0 .+ b_i)) .* x .^ (2.0 ./ b_i) .+
-               (b_i ./ (3.0 .+ b_i)) .* x .^ (3.0 ./ b_i)
+    S_series = CUDA.ones(float_type, size(x))
+
+    # Approximate the series expansion from eq. (15) using the first 30 terms
+    for n = 1:30
+        S_series .+= (b_i ./ (n .+ b_i)) .* x .^ (n ./ b_i)
+    end
 
     i_m = (1.0 .+ b_i) .* topsoil_moisture_max  # Max infiltration, Eq. 17 rewritten
     i_0 = i_m .* (1.0 .- (1.0 .- A_sat) .^ (1.0 ./ b_i))  # Eq. 13
@@ -233,13 +250,15 @@ end
 
 function update_water_canopy_storage(
     water_storage,
-    prec_gpu,
+    prec_gpu, cv_gpu,
     canopy_evaporation,
     max_water_storage,
     throughfall)
 
+    println("canopy_evaporation!!!!!!!!!!!!!!!!!!!!!: ", size(canopy_evaporation))
+
     # Calculate new water storage: current storage + (precipitation - canopy evaporation)
-    new_water_storage = water_storage .+ prec_gpu .- canopy_evaporation
+    new_water_storage = water_storage .+ (prec_gpu .* cv_gpu) .- canopy_evaporation
     
     # Compute throughfall: excess water beyond max storage
     throughfall = max.(0, new_water_storage .- max_water_storage)
@@ -247,7 +266,7 @@ function update_water_canopy_storage(
     # Update water storage: clamp between 0 and max_water_storage
     water_storage = max.(0.0, min.(new_water_storage, max_water_storage))
     
-    return water_storage, throughfall
+    return water_storage, throughfall # TODO: why does (water_storage ./ 2) give near perfect values?
 end
 
 # Eq. (23): Total evapotranspiration
