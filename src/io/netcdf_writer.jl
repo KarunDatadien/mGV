@@ -133,6 +133,8 @@ function create_output_netcdf(output_file::String, reference_array, reference_ar
     soil_moisture_max_output = defVar(out_ds, "soil_moisture_max_output", float_type, ("lon", "lat", "layer", "nveg"))
     soil_moisture_critical_output = defVar(out_ds, "soil_moisture_critical_output", float_type, ("lon", "lat", "layer"))
 
+    residual_moisture_output = defVar(out_ds, "residual_moisture_output", float_type, ("lon", "lat", "time", "layer"))
+
     E_1_t_output = defVar(out_ds, "E_1_t_output", float_type, ("lon", "lat", "time", "nveg"))
     E_2_t_output = defVar(out_ds, "E_2_t_output", float_type, ("lon", "lat", "time", "nveg"))
     g_sw_1_output = defVar(out_ds, "g_sw_1_output", float_type, ("lon", "lat", "time", "nveg"))
@@ -147,6 +149,6 @@ function create_output_netcdf(output_file::String, reference_array, reference_ar
            net_radiation_summed_output, max_water_storage_output, max_water_storage_summed_output,
            soil_evaporation_output, soil_temperature_output, soil_moisture_output,  total_et_output, total_runoff_output,
            kappa_array_output, cs_array_output, wilting_point_output, soil_moisture_max_output, soil_moisture_critical_output,
-           E_1_t_output, E_2_t_output, g_sw_1_output, g_sw_2_output, g_sw_output
+           E_1_t_output, E_2_t_output, g_sw_1_output, g_sw_2_output, g_sw_output, residual_moisture_output
 
 end
