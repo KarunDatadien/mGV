@@ -217,10 +217,10 @@ function calculate_transpiration(
 end
 
 
-function calculate_soil_evaporation(soil_moisture, soil_moisture_max, potential_evaporation, b_i)
+function calculate_soil_evaporation(soil_moisture, soil_moisture_max, potential_evaporation, b_i, cv_gpu)
     # Sum the soil moisture and maximum soil moisture across the top two layers
-    topsoil_moisture = sum(soil_moisture[:, :, 1:2, end:end], dims=3)
-    topsoil_moisture_max = sum(soil_moisture_max[:, :, 1:2, end:end], dims=3)
+    topsoil_moisture = sum(soil_moisture[:, :, 1:1, end:end], dims=3)
+    topsoil_moisture_max = sum(soil_moisture_max[:, :, 1:1, end:end], dims=3)
 
     # Compute the saturated area fraction
     A_sat = 1.0 .- (1.0 .- topsoil_moisture ./ topsoil_moisture_max) .^ b_i
@@ -239,14 +239,15 @@ function calculate_soil_evaporation(soil_moisture, soil_moisture_max, potential_
     i_0 = i_m .* (1.0 .- (1.0 .- A_sat) .^ (1.0 ./ b_i))  # Eq. 13
 
     # Unsaturated evaporation contribution
-    Ev_unsat = potential_evaporation[:, :, :, end:end] .* i_0 ./ i_m .* x .* S_series
+    Ev_unsat = potential_evaporation[:, :, :, end:end]  .* i_0 ./ i_m .* x .* S_series
 
     # Saturated evaporation contribution
-    Ev_sat = potential_evaporation[:, :, :, end:end] .* A_sat
+    Ev_sat = potential_evaporation[:, :, :, end:end] .* A_sat # .* cv_gpu[:, :, :, end:end]
 
     # Total soil evaporation
-    return Ev_sat .+ Ev_unsat
+    return (Ev_sat .+ Ev_unsat) 
 end
+
 
 function update_water_canopy_storage(
     water_storage,
@@ -266,7 +267,7 @@ function update_water_canopy_storage(
     # Update water storage: clamp between 0 and max_water_storage
     water_storage = max.(0.0, min.(new_water_storage, max_water_storage))
     
-    return water_storage, throughfall # TODO: why does (water_storage ./ 2) give near perfect values?
+    return (water_storage), throughfall # TODO: why does (water_storage ./ 2) give near perfect values?
 end
 
 # Eq. (23): Total evapotranspiration

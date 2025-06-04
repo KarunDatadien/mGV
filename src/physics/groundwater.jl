@@ -72,16 +72,18 @@ end
 
 function update_topsoil_moisture(prec_gpu, throughfall, soil_moisture_old, soil_moisture_max, surface_runoff, Q_12, soil_evaporation, depth_gpu, E_1_t)
     # Sum the soil moisture and maximum soil moisture across the top two layers (layer 1)
-    topsoil_moisture_max = sum(soil_moisture_max[:, :, 1:2, :], dims=3)  # W_1^c
+#    topsoil_moisture_max = sum(soil_moisture_max[:, :, 1:2], dims=3)  # W_1^c
+
 
     # Compute updated soil moisture for vegetated layers (n = 1 to nveg) using throughfall
-    topsoil_moisture_new_veg = (throughfall[:, :, :, 1:end-1] .- surface_runoff[:, :, :, 1:end-1] ) .- Q_12[:, :, :, 1:end-1]  .- E_1_t[:, :, :, 1:end-1] 
+    topsoil_moisture_new_veg = (sum_with_nan_handling(throughfall[:, :, :, 1:end], 4) )  .- sum_with_nan_handling(E_1_t[:, :, :, 1:end-1], 4) .- surface_runoff[:, :, :, end:end] .- soil_evaporation
 
     # Compute updated soil moisture for bare soil layer (n = nveg+1) using prec_gpu
-    topsoil_moisture_new_bare = (prec_gpu .- surface_runoff[:, :, :, end:end] .- Q_12[:, :, :, end:end] .- soil_evaporation)
+#    topsoil_moisture_new_bare = (prec_gpu .* cv_gpu[:, :, :, end:end] .- surface_runoff[:, :, :, end:end] .- soil_evaporation)
 
     # Combine updated soil moistures
-    topsoil_moisture_new = cat(topsoil_moisture_new_veg, topsoil_moisture_new_bare, dims=4)
+#    topsoil_moisture_new = topsoil_moisture_new_veg .+ topsoil_moisture_new_bare .- Q_12
+    topsoil_moisture_new = topsoil_moisture_new_veg .- Q_12
 
     # Since soil_moisture_old has size (204, 180, 3, nveg+1), update the first two layers
     soil_moisture_new = copy(soil_moisture_old)
@@ -91,23 +93,34 @@ function update_topsoil_moisture(prec_gpu, throughfall, soil_moisture_old, soil_
     fraction_layer1 = depth_gpu[:, :, 1:1] ./ total_depth
     fraction_layer2 = depth_gpu[:, :, 2:2] ./ total_depth
 
-    # Apply depth ratios to all layers (n = 1 to nveg+1)
-    soil_moisture_new[:, :, 1:1, :] = soil_moisture_old[:, :, 1:1, :] .+ topsoil_moisture_new .* fraction_layer1
-    soil_moisture_new[:, :, 2:2, :] = soil_moisture_old[:, :, 2:2, :] .+ topsoil_moisture_new .* fraction_layer2
 
-    soil_moisture_new[:, :, 1:1, :] = max.(0.0, min.(soil_moisture_max[:, :, 1:1, :], soil_moisture_new[:, :, 1:1, :]))
-    soil_moisture_new[:, :, 2:2, :] = max.(0.0, min.(soil_moisture_max[:, :, 2:2, :], soil_moisture_new[:, :, 2:2, :]))
+    println("topsoil_moisture_new_veg shape: ", size(topsoil_moisture_new_veg))
+  #  println("topsoil_moisture_new_bare shape: ", size(topsoil_moisture_new_bare))
+    println("sum_with_nan_handling(surface_runoff[:, :, :, 1:end-1], 4)  shape: ", size(sum_with_nan_handling(surface_runoff[:, :, :, 1:end-1], 4) ))
+    println("Q_12 shape: ", size(Q_12))
+
+
+
+    # Apply depth ratios to all layers (n = 1 to nveg+1)
+    soil_moisture_new[:, :, 1:1] = soil_moisture_old[:, :, 1:1] .+ topsoil_moisture_new .* fraction_layer1
+    soil_moisture_new[:, :, 2:2] = soil_moisture_old[:, :, 2:2] .+ topsoil_moisture_new .* fraction_layer2
+
+    soil_moisture_new[:, :, 1:1] = max.(0.0, min.(soil_moisture_max[:, :, 1:1], soil_moisture_new[:, :, 1:1]))
+    soil_moisture_new[:, :, 2:2] = max.(0.0, min.(soil_moisture_max[:, :, 2:2], soil_moisture_new[:, :, 2:2]))
+ 
+
 
     return soil_moisture_new
 end
+
 
 
 function calculate_drainage_Q12(soil_moisture_old, soil_moisture_max, ksat_gpu, residual_moisture, expt_gpu)
     # TODO: check if this function is correct, gives different results from VIC-c
 
     # Compute drainage for each sub-layer (layers 1 and 2) for all n
-    sublayer_moisture = sum_with_nan_handling(soil_moisture_old[:, :, 1:2, :], 4) 
-    sublayer_moisture_max = sum_with_nan_handling(soil_moisture_max[:, :, 1:2, :], 4) 
+    sublayer_moisture = soil_moisture_old[:, :, 1:2]
+    sublayer_moisture_max = soil_moisture_max[:, :, 1:2] 
     K_s = ksat_gpu[:, :, 1:2] # [mm/day]
     theta_r = residual_moisture[:, :, 1:2] 
     expt_sublayer = expt_gpu[:, :, 1:2]  
@@ -121,7 +134,7 @@ function calculate_drainage_Q12(soil_moisture_old, soil_moisture_max, ksat_gpu, 
     Q_12_sublayer = max.(Q_12_sublayer, 0.0)
 
     # Sum the contributions from the two sub-layers for each n
-    Q_12 = sum(Q_12_sublayer, dims=3)
+    Q_12 = sum(Q_12_sublayer, dims=3) 
 
     return Q_12
 end
@@ -129,14 +142,12 @@ end
 
 function update_bottomsoil_moisture(soil_moisture_new, soil_moisture_max, Q_b, Q_12, E_2_t)
     # Bottom layer is the third layer (index 3) in your 3-layer setup, for all n
-    bottomsoil_moisture = soil_moisture_new[:, :, 3:3, :]    # W_2^-[n]
-    bottomsoil_moisture_max = soil_moisture_max[:, :, 3:3, :]  # W_2^c
+    bottomsoil_moisture = soil_moisture_new[:, :, 3:3]    # W_2^-[n]
+    bottomsoil_moisture_max = soil_moisture_max[:, :, 3:3]  # W_2^c
     
     # Eq. 22a: Compute new bottom soil moisture (W_2^+[n])
     # For vegetated layers (n = 1 to nveg-1), include E_2^t[n]; for bare soil (nveg), E_2 = 0
-    bottomsoil_moisture_new_veg = bottomsoil_moisture[:, :, :, 1:end-1] .+ (Q_12[:, :, :, 1:end-1] .- Q_b[:, :, :, 1:end-1] .- E_2_t[:, :, :, 1:end-1])
-    bottomsoil_moisture_new_bare = bottomsoil_moisture[:, :, :, end:end] .+ (Q_12[:, :, :, end:end] .- Q_b[:, :, :, end:end])
-    bottomsoil_moisture_new = cat(bottomsoil_moisture_new_veg, bottomsoil_moisture_new_bare, dims=4)
+    bottomsoil_moisture_new = bottomsoil_moisture .+ Q_12 .- Q_b .- sum_with_nan_handling(E_2_t[:, :, :, 1:end-1], 4) 
 
     # Ensure non-negative moisture
     bottomsoil_moisture_new = max.(0.0, min.(bottomsoil_moisture_max, bottomsoil_moisture_new))
@@ -160,7 +171,7 @@ function update_bottomsoil_moisture(soil_moisture_new, soil_moisture_max, Q_b, Q
     subsurface_runoff_total = Q_b .+ Q_b_excess
 
     # Update the full soil_moisture_old array with the new bottom layer values
-    soil_moisture_new[:, :, 3:3, :] = bottomsoil_moisture_new
+    soil_moisture_new[:, :, 3:3] = bottomsoil_moisture_new
 
-    return soil_moisture_new[:, :, 3:3, :], subsurface_runoff_total
+    return soil_moisture_new[:, :, 3:3], subsurface_runoff_total
 end
