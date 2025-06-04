@@ -36,7 +36,7 @@ function create_output_netcdf(output_file::String, reference_array, reference_ar
     water_storage_summed_output.attrib["units"] = "mm"
     water_storage_summed_output.attrib["description"] = "Total water stored in the canopy"
 
-    Q12_output = defVar(out_ds, "Q12_output", float_type, ("lon", "lat", "time", "nveg"))
+    Q12_output = defVar(out_ds, "Q12_output", float_type, ("lon", "lat", "time"))
     Q12_output.attrib["units"] = "mm"
     Q12_output.attrib["description"] = "Drainage from layer 1 to layer 2 per vegetation"
     
@@ -130,7 +130,7 @@ function create_output_netcdf(output_file::String, reference_array, reference_ar
     cs_array_output = defVar(out_ds, "cs_array_output", float_type, ("lon", "lat", "time", "layer"))
 
     wilting_point_output = defVar(out_ds, "wilting_point_output", float_type, ("lon", "lat", "layer"))
-    soil_moisture_max_output = defVar(out_ds, "soil_moisture_max_output", float_type, ("lon", "lat", "layer", "nveg"))
+    soil_moisture_max_output = defVar(out_ds, "soil_moisture_max_output", float_type, ("lon", "lat", "layer"))
     soil_moisture_critical_output = defVar(out_ds, "soil_moisture_critical_output", float_type, ("lon", "lat", "layer"))
 
     residual_moisture_output = defVar(out_ds, "residual_moisture_output", float_type, ("lon", "lat", "time", "layer"))
