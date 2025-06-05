@@ -73,13 +73,11 @@ bulk_dens_min, soil_dens_min, porosity, soil_moisture_max, soil_moisture_critica
     calculate_soil_properties(bulk_dens_gpu, soil_dens_gpu, depth_gpu, Wcr_gpu, Wfc_gpu, Wpwp_gpu, residmoist_gpu)
 
 # Repeat init_moist_gpu along the 4th dimension (TODO: note, I changed init_moist_gpu here to field_capacity after discussions with modelling group)
-soil_moisture_new[:, :, 1:1] = init_moist_gpu[:, :, 1:1]
-soil_moisture_new[:, :, 2:2] = init_moist_gpu[:, :, 2:2]
-soil_moisture_new[:, :, 3:3] = init_moist_gpu[:, :, 3:3]
-
+soil_moisture_new = init_moist_gpu
 #soil_moisture_new = field_capacity, outer=(1, 1, 1, size(coverage_gpu, 4)))
 soil_moisture_max = soil_moisture_max
- 
+
+println("Soil moisture at position [4,22,1]: ", Array(soil_moisture_new[4:4, 22:22, 1:1])[1])
 
 function process_year(year)
 
@@ -111,6 +109,7 @@ function process_year(year)
           E_1_t_output, E_2_t_output, g_sw_1_output, g_sw_2_output, g_sw_output, residual_moisture_output, throughfall_output, throughfall_summed_output =
           create_output_netcdf(output_file, prec_cpu, LAI_cpu, float_type, lat_cpu, lon_cpu)
 
+println("Soil moisture at position [4,22,1]: ", Array(soil_moisture_new[4:4, 22:22, 1:1])[1])
     println("Running...") 
     num_days = size(prec_cpu, 3)
     day_prev = 0
@@ -153,9 +152,9 @@ function process_year(year)
             @timeit to "calculate_canopy_evaporation" canopy_evaporation = calculate_canopy_evaporation(
                 water_storage, max_water_storage, potential_evaporation, aerodynamic_resistance, rarc_gpu, prec_gpu, cv_gpu
             ) # Eq. (1), (9) and (10), works ✅
-
+println("1 Soil moisture at position [4,22,1]: ", Array(soil_moisture_new[4:4, 22:22, 1:1])[1])
             soil_moisture_old = soil_moisture_new
-
+println("2 Soil moisture at position [4,22,1]: ", Array(soil_moisture_new[4:4, 22:22, 1:1])[1])
             @timeit to "calculate_transpiration" transpiration, E_1_t, E_2_t, g_sw_1, g_sw_2, g_sw = calculate_transpiration(
                 potential_evaporation, aerodynamic_resistance, rarc_gpu, 
                 water_storage, max_water_storage, soil_moisture_old, soil_moisture_critical, wilting_point, 
@@ -247,6 +246,7 @@ function process_year(year)
                 cv_gpu
             ) 
 
+println("3 BEFORE OUTPUT Soil moisture at position [4,22,1]: ", Array(soil_moisture_new[4:4, 22:22, 1:1])[1])
 
 
             @timeit to "outputs" begin
