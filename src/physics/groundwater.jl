@@ -96,10 +96,8 @@ function update_topsoil_moisture(
     soil_moisture_new[:, :, 1:1] .-= excess
     soil_moisture_new[:, :, 2:2] .+= excess
 
-    # Borrow from layer 2 if layer 1 becomes negative
-    deficit = max.(.-soil_moisture_new[:, :, 1:1], 0.0)
-    soil_moisture_new[:, :, 1:1] .+= deficit
-    soil_moisture_new[:, :, 2:2] .-= deficit
+    # Clamp layer 1 to zero if it becomes negative
+    soil_moisture_new[:, :, 1:1] = max.(soil_moisture_new[:, :, 1:1], 0.0)
 
     # Remove soil evaporation from the first layer only
     soil_moisture_new[:, :, 1:1] .-= soil_evaporation
