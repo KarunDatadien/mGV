@@ -172,7 +172,8 @@ function process_year(year)
 
             # Water balance toplayer update 
             @timeit to "update_topsoil_moisture" soil_moisture_new = update_topsoil_moisture(
-                prec_gpu, throughfall, soil_moisture_old, soil_moisture_max, surface_runoff, Q_12, soil_evaporation, depth_gpu, E_1_t
+                throughfall, soil_moisture_old, soil_moisture_max,
+                surface_runoff, Q_12, soil_evaporation, E_1_t
             )
 
             # Calculate subsurface runoff

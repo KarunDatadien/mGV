@@ -71,14 +71,12 @@ end
 
 
 function update_topsoil_moisture(
-    prec_gpu,
     throughfall,
     soil_moisture_old,
     soil_moisture_max,
     surface_runoff,
     Q_12,
     soil_evaporation,
-    depth_gpu,
     E_1_t,
 )
 
@@ -89,19 +87,26 @@ function update_topsoil_moisture(
                            surface_runoff[:, :, :, end:end] .-
                            Q_12
 
-    # Distribute the change in top soil moisture between layer 1 and 2
-    total_depth = sum(depth_gpu[:, :, 1:2], dims=3)
-    fraction_layer1 = depth_gpu[:, :, 1:1] ./ total_depth
-    fraction_layer2 = depth_gpu[:, :, 2:2] ./ total_depth
+    # Update layer 1 first with any incoming water
+    soil_moisture_new[:, :, 1:1] = soil_moisture_old[:, :, 1:1] .+ topsoil_moisture_new
+    soil_moisture_new[:, :, 2:2] = soil_moisture_old[:, :, 2:2]
 
-    soil_moisture_new[:, :, 1:1] = soil_moisture_old[:, :, 1:1] .+ topsoil_moisture_new .* fraction_layer1
-    soil_moisture_new[:, :, 2:2] = soil_moisture_old[:, :, 2:2] .+ topsoil_moisture_new .* fraction_layer2
+    # Overflow from layer 1 goes to layer 2
+    excess = max.(soil_moisture_new[:, :, 1:1] .- soil_moisture_max[:, :, 1:1], 0.0)
+    soil_moisture_new[:, :, 1:1] .-= excess
+    soil_moisture_new[:, :, 2:2] .+= excess
+
+    # Borrow from layer 2 if layer 1 becomes negative
+    deficit = max.(.-soil_moisture_new[:, :, 1:1], 0.0)
+    soil_moisture_new[:, :, 1:1] .+= deficit
+    soil_moisture_new[:, :, 2:2] .-= deficit
 
     # Remove soil evaporation from the first layer only
     soil_moisture_new[:, :, 1:1] .-= soil_evaporation
 
-    soil_moisture_new[:, :, 1:1] = max.(0.0, min.(soil_moisture_max[:, :, 1:1], soil_moisture_new[:, :, 1:1]))
-    soil_moisture_new[:, :, 2:2] = max.(0.0, min.(soil_moisture_max[:, :, 2:2], soil_moisture_new[:, :, 2:2]))
+    # Constrain within physical bounds
+    soil_moisture_new[:, :, 1:1] = clamp.(soil_moisture_new[:, :, 1:1], 0.0, soil_moisture_max[:, :, 1:1])
+    soil_moisture_new[:, :, 2:2] = clamp.(soil_moisture_new[:, :, 2:2], 0.0, soil_moisture_max[:, :, 2:2])
 
     return soil_moisture_new
 end
