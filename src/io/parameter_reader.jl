@@ -7,7 +7,10 @@ function read_and_allocate_parameter(varname::String)
     var_dims      = size(dataset[varname])  # Get the dimensions of the variable
 
     # Handle slicing based on dimensionality
-    if length(var_dims) == 2
+    if length(var_dims) == 1
+        cpu_preload = dataset[varname][:]
+        println("Element type for 1D: ", eltype(cpu_preload))
+    elseif length(var_dims) == 2
         cpu_preload = dataset[varname][:, :]
         println("Element type for 2D: ", eltype(cpu_preload))
     elseif length(var_dims) == 3

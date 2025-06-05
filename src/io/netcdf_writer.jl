@@ -1,4 +1,4 @@
-function create_output_netcdf(output_file::String, reference_array, reference_array2, float_type)
+function create_output_netcdf(output_file::String, reference_array, reference_array2, float_type, lat_cpu, lon_cpu)
     println("Creating NetCDF output file...")
     out_ds = NCDataset(output_file, "c")
     
@@ -10,23 +10,36 @@ function create_output_netcdf(output_file::String, reference_array, reference_ar
     defDim(out_ds, "layer", 3)
     defDim(out_ds, "top_layer", 1)
 
+    # Define latitude variable and assign values
     lat = defVar(out_ds, "lat", float_type, ("lat",))
     lat.attrib["axis"] = "Y"
     lat.attrib["long_name"] = "latitude"
     lat.attrib["standard_name"] = "latitude"
     lat.attrib["units"] = "degrees_north"
-    
+    lat[:] = lat_cpu  # Assign the latitude values
+
+    # Define longitude variable and assign values
     lon = defVar(out_ds, "lon", float_type, ("lon",))
     lon.attrib["axis"] = "X"
     lon.attrib["long_name"] = "longitude"
     lon.attrib["standard_name"] = "longitude"
     lon.attrib["units"] = "degrees_east"
+    lon[:] = lon_cpu  # Assign the longitude values
 
     # Define the output variables to be written
     precipitation_output = defVar(out_ds, "precipitation_output", float_type, ("lon", "lat", "time"))
     precipitation_output.attrib["units"]       = "mm/day"
     precipitation_output.attrib["description"] = "Daily precipitation"
     #precipitation_output.attrib["_FillValue"] = float_type(NaN)
+
+
+    throughfall_output = defVar(out_ds, "throughfall_output", float_type, ("lon", "lat", "time", "nveg"))
+    throughfall_output.attrib["units"]       = "mm/day"
+    throughfall_output.attrib["description"] = "Daily throughfall per vegetation"
+
+    throughfall_summed_output = defVar(out_ds, "throughfall_summed_output", float_type, ("lon", "lat", "time"))
+    throughfall_summed_output.attrib["units"]       = "mm/day"
+    throughfall_summed_output.attrib["description"] = "Total daily throughfall"
 
     water_storage_output = defVar(out_ds, "water_storage_output", float_type, ("lon", "lat", "time", "nveg"))
     water_storage_output.attrib["units"] = "mm"
@@ -145,6 +158,6 @@ function create_output_netcdf(output_file::String, reference_array, reference_ar
            net_radiation_summed_output, max_water_storage_output, max_water_storage_summed_output,
            soil_evaporation_output, soil_temperature_output, soil_moisture_output,  total_et_output, total_runoff_output,
            kappa_array_output, cs_array_output, wilting_point_output, soil_moisture_max_output, soil_moisture_critical_output,
-           E_1_t_output, E_2_t_output, g_sw_1_output, g_sw_2_output, g_sw_output, residual_moisture_output
+           E_1_t_output, E_2_t_output, g_sw_1_output, g_sw_2_output, g_sw_output, residual_moisture_output, throughfall_output, throughfall_summed_output
 
 end

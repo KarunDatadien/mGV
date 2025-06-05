@@ -4,6 +4,9 @@ check_and_set_gpu_usage()
 # Choose Float64 or Float32 for operations and output
 global float_type = Float32
 
+lat_var = "lat"
+lon_var = "lon"
+
 # Load the configuration matching the input argument:
 if CASE == "global"
 
@@ -21,7 +24,7 @@ if CASE == "global"
     input_vp_prefix        = "./input_data/global/5arcmin/forcing/vp/vp_WFDE5_v2.0_5arcmin_"
     input_swdown_prefix    = "./input_data/global/5arcmin/forcing/swdown/swdown_WFDE5_v2.0_5arcmin_"
     input_lwdown_prefix    = "./input_data/global/5arcmin/forcing/lwdown/lwdown_WFDE5_v2.0_5arcmin_"
-    
+
     # Input variable names (as specified in the input files' metadata)
     d0_var = "displacement"
     z0_var = "veg_rough"
