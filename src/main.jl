@@ -4,6 +4,9 @@ const to = TimerOutputs.TimerOutput()
 println("Loading parameter data and allocating memory...")
 
 @time begin
+    (lat_cpu,        lat_gpu)         = read_and_allocate_parameter(lat_var)
+    (lon_cpu,        lon_gpu)         = read_and_allocate_parameter(lon_var)
+
     (d0_cpu,         d0_gpu)         = read_and_allocate_parameter(d0_var)
     (z0_cpu,         z0_gpu)         = read_and_allocate_parameter(z0_var)
     (z0soil_cpu,     z0soil_gpu)     = read_and_allocate_parameter(z0soil_var)
@@ -70,10 +73,14 @@ bulk_dens_min, soil_dens_min, porosity, soil_moisture_max, soil_moisture_critica
     calculate_soil_properties(bulk_dens_gpu, soil_dens_gpu, depth_gpu, Wcr_gpu, Wfc_gpu, Wpwp_gpu, residmoist_gpu)
 
 # Repeat init_moist_gpu along the 4th dimension (TODO: note, I changed init_moist_gpu here to field_capacity after discussions with modelling group)
-soil_moisture_new = init_moist_gpu
+soil_moisture_new[:, :, 1:1] = init_moist_gpu[:, :, 1:1]
+soil_moisture_new[:, :, 2:2] = init_moist_gpu[:, :, 2:2]
+soil_moisture_new[:, :, 3:3] = init_moist_gpu[:, :, 3:3]
+
 #soil_moisture_new = field_capacity, outer=(1, 1, 1, size(coverage_gpu, 4)))
 soil_moisture_max = soil_moisture_max
  
+
 function process_year(year)
 
     # Ensure we're modifying the global variables
@@ -101,8 +108,8 @@ function process_year(year)
           net_radiation_summed_output, max_water_storage_output, max_water_storage_summed_output,
           soil_evaporation_output, soil_temperature_output, soil_moisture_output, total_et_output, total_runoff_output, 
           kappa_array_output, cs_array_output, wilting_point_output, soil_moisture_max_output, soil_moisture_critical_output,
-          E_1_t_output, E_2_t_output, g_sw_1_output, g_sw_2_output, g_sw_output, residual_moisture_output =
-          create_output_netcdf(output_file, prec_cpu, LAI_cpu, float_type)
+          E_1_t_output, E_2_t_output, g_sw_1_output, g_sw_2_output, g_sw_output, residual_moisture_output, throughfall_output, throughfall_summed_output =
+          create_output_netcdf(output_file, prec_cpu, LAI_cpu, float_type, lat_cpu, lon_cpu)
 
     println("Running...") 
     num_days = size(prec_cpu, 3)
@@ -254,9 +261,11 @@ function process_year(year)
 
                 @timeit to "tair_output"                       tair_output[:, :, day]                    = Array(tair_gpu)
                 @timeit to "precipitation_output"              precipitation_output[:, :, day]           = Array(prec_gpu)
+                @timeit to "throughfall_output"                throughfall_output[:, :, day, :]          = Array(throughfall)
+                @timeit to "throughfall_summed_output"         throughfall_summed_output[:, :, day]      = Array(sum_with_nan_handling(throughfall, 4))
 
                 @timeit to "Q12_processed"                     Q12_processed                             = ifelse.(abs.(Q_12) .> fillvalue_threshold, NaN, Q_12)       
-                @timeit to "Q12_output"                        Q12_output[:, :, day]                  = Array(Q_12) 
+                @timeit to "Q12_output"                        Q12_output[:, :, day]                     = Array(Q_12) 
 
                 @timeit to "soil_evaporation_output"           soil_evaporation_output[:, :, day, :]     = Array(soil_evaporation)
                 @timeit to "soil_temperature_output"           soil_temperature_output[:, :, day, :]     = Array(soil_temperature)
