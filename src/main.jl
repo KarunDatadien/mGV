@@ -34,7 +34,6 @@ println("Loading parameter data and allocating memory...")
     (Tavg_cpu,       Tavg_gpu)       = read_and_allocate_parameter(Tavg_var)
 end
 
-println("Loading gpu_load_static_inputs...")
 gpu_load_static_inputs([rmin_cpu, rarc_cpu, cv_cpu, elev_cpu, ksat_cpu, residmoist_cpu, init_moist_cpu, root_cpu,
                         Wcr_cpu, Wfc_cpu, Wpwp_cpu, depth_cpu, quartz_cpu,
                         bulk_dens_cpu, soil_dens_cpu, expt_cpu, b_infilt_cpu,
@@ -53,23 +52,18 @@ global canopy_evaporation = CUDA.zeros(float_type, size(coverage_gpu))
 global bulk_dens_min = CUDA.zeros(float_type, size(bulk_dens_gpu))
 global soil_dens_min = CUDA.zeros(float_type, size(bulk_dens_gpu))
 global porosity      = CUDA.zeros(float_type, size(bulk_dens_gpu))
-
 global soil_temperature = CUDA.zeros(float_type, size(soil_dens_gpu))
 global Lsum = CUDA.zeros(float_type, size(soil_dens_gpu))
-global tsurf = CUDA.zeros(Float64, size(d0_gpu))
-global tsurf_n = CUDA.zeros(Float64, size(albedo_gpu))
-
-
-
-
+global tsurf = CUDA.zeros(float_type, size(d0_gpu))
+global tsurf_n = CUDA.zeros(float_type, size(albedo_gpu))
 
 global soil_moisture_old = CUDA.zeros(float_type, size(soil_dens_gpu, 1), size(soil_dens_gpu, 2), size(soil_dens_gpu, 3))
 global soil_moisture_new = CUDA.zeros(float_type, size(soil_dens_gpu, 1), size(soil_dens_gpu, 2), size(soil_dens_gpu, 3))
 global soil_moisture_max = CUDA.zeros(float_type, size(soil_dens_gpu, 1), size(soil_dens_gpu, 2), size(soil_dens_gpu, 3))
 
-soil_temperature[:, :, 1:1] .= Tavg_gpu
-soil_temperature[:, :, 2:2] .= Tavg_gpu
-soil_temperature[:, :, 3:3] .= Tavg_gpu
+soil_temperature[:, :, 1:1] = Tavg_gpu
+soil_temperature[:, :, 2:2] = Tavg_gpu
+soil_temperature[:, :, 3:3] = Tavg_gpu
 
 # === Calculate Soil Properties ===
 bulk_dens_min, soil_dens_min, porosity, soil_moisture_max, soil_moisture_critical, field_capacity, wilting_point, residual_moisture = 
@@ -77,11 +71,11 @@ bulk_dens_min, soil_dens_min, porosity, soil_moisture_max, soil_moisture_critica
 
 # Repeat init_moist_gpu along the 4th dimension (TODO: note, I changed init_moist_gpu here to field_capacity after discussions with modelling group)
 soil_moisture_new = init_moist_gpu
-#soil_moisture_new = repeat(field_capacity, outer=(1, 1, 1, size(coverage_gpu, 4)))
+#soil_moisture_new = field_capacity, outer=(1, 1, 1, size(coverage_gpu, 4)))
 soil_moisture_max = soil_moisture_max
-
+ 
 function process_year(year)
-    
+
     # Ensure we're modifying the global variables
     global water_storage, throughfall, canopy_evaporation, bulk_dens_min, soil_dens_min, porosity, soil_moisture_old, 
            soil_moisture_new, soil_moisture_max, soil_moisture_critical, field_capacity, wilting_point, residual_moisture, soil_temperature, Lsum, tsurf, tsurf_n
@@ -96,12 +90,11 @@ function process_year(year)
         (swdown_cpu, swdown_gpu)  = read_and_allocate_forcing(input_swdown_prefix,  year, swdown_var)
         (lwdown_cpu, lwdown_gpu)  = read_and_allocate_forcing(input_lwdown_prefix,  year, lwdown_var)
     end
-    CUDA.synchronize()
 
     println("Opening output file...")
     output_file = joinpath(output_dir, "$(output_file_prefix)$(year).nc")
     
-    @time out_ds, precipitation_output, water_storage_output, water_storage_summed_output, Q12_output, Q12_summed_output,
+    @time out_ds, precipitation_output, water_storage_output, water_storage_summed_output, Q12_output, 
           tair_output, tsurf_output, canopy_evaporation_output, canopy_evaporation_summed_output, 
           transpiration_output, transpiration_summed_output, aerodynamic_resistance_output, aerodynamic_resistance_summed_output,
           potential_evaporation_output, potential_evaporation_summed_output, net_radiation_output,
@@ -110,16 +103,6 @@ function process_year(year)
           kappa_array_output, cs_array_output, wilting_point_output, soil_moisture_max_output, soil_moisture_critical_output,
           E_1_t_output, E_2_t_output, g_sw_1_output, g_sw_2_output, g_sw_output, residual_moisture_output =
           create_output_netcdf(output_file, prec_cpu, LAI_cpu, float_type)
-
-    CUDA.synchronize()
-
-    println("Shape of soil_moisture_max: $(size(soil_moisture_max))")
-    println("Shape of wilting_point: $(size(wilting_point))")
-    println("Shape of soil_moisture_critical: $(size(soil_moisture_critical))")
-
-   # Shape of soil_moisture_max: (36, 36, 3, 14)
-   # Shape of wilting_point: (36, 36, 3)
-   # Shape of soil_moisture_critical: (36, 36, 3)
 
     println("Running...") 
     num_days = size(prec_cpu, 3)
@@ -139,11 +122,6 @@ function process_year(year)
             @timeit to "gpu_load_daily_inputs" gpu_load_daily_inputs(day, day_prev, 
                                   [prec_cpu, tair_cpu, wind_cpu, vp_cpu, swdown_cpu, lwdown_cpu], 
                                   [prec_gpu, tair_gpu, wind_gpu, vp_gpu, swdown_gpu, lwdown_gpu])
-
-            CUDA.synchronize()
-
-            prec_value = Array(prec_gpu[27:27, 30:30])[1, 1]
-            println("Day $day: prec_gpu[27, 30] = $prec_value")
 
             # For the first timestep we set tsurf = tair (see page 14,421 of Liang et al. (1994)):
             if day == 1 && year == start_year 
@@ -187,15 +165,10 @@ function process_year(year)
             # Direct surface runoff
             @timeit to "calculate_surface_runoff" surface_runoff = calculate_surface_runoff(
                 prec_gpu, throughfall, soil_moisture_old, soil_moisture_max, b_infilt_gpu, cv_gpu
-                ) # Eq. (18a) and (18b)
-
-
-            println("residual_moisture shape: ", size(residual_moisture))
+            ) # Eq. (18a) and (18b)
 
             # Drainage from layer 1 to 2; Q12
             @timeit to "calculate_drainage_Q12" Q_12 = calculate_drainage_Q12(soil_moisture_old, soil_moisture_max, ksat_gpu, residual_moisture, expt_gpu) # Eq. (20) TODO: check if expt_gpu is correct?
-
-           # Q_12 = Q_12 .* cv_gpu ./ 1000 # TODO: is this right or not?
 
             # Water balance toplayer update 
             @timeit to "update_topsoil_moisture" soil_moisture_new = update_topsoil_moisture(
@@ -244,17 +217,11 @@ function process_year(year)
                     cv_gpu
                 ) 
 
-                println("INIT TEMPERATURE")
-
                 @timeit to "compute_aerodynamic_resistance" aerodynamic_resistance = compute_aerodynamic_resistance(
                     z2, d0_gpu, z0_gpu, z0soil_gpu, tsurf, tair_gpu, wind_gpu, cv_gpu
                 )  # Eq. (3). 
 
-                println("INIT COMPUTE AERODYNAMIC")
-
             end
-
-            println("NEW TEMPERATURE")
 
             @timeit to "solve_surface_temperature" tsurf = solve_surface_temperature(
                 tsurf,          # Surface temperature (CuArray)
@@ -271,10 +238,8 @@ function process_year(year)
                 tair_gpu,
                 cv_gpu
             ) 
-            println("NEW TEMPERATURE CALCULATED")
 
 
-            CUDA.synchronize()
 
             @timeit to "outputs" begin
                 ### Variables without fill-value replacement ###
@@ -283,28 +248,19 @@ function process_year(year)
                 @timeit to "aerodynamic_resistance_output"     aerodynamic_resistance_output[:, :, day, :] = Array(aerodynamic_resistance)
                 @timeit to "aerodynamic_resistance_summed_output"     aerodynamic_resistance_summed_output[:, :, day] = Array(sum_with_nan_handling(aerodynamic_resistance, 4))
 
-                println("CHECKPOINT 1")
-
                 @timeit to "transpiration_output"              transpiration_output[:, :, day, :]        = Array(transpiration)
                 @timeit to "transpiration_summed_output"       transpiration_summed_output[:, :, day]    = Array(sum_with_nan_handling(cv_gpu .* transpiration, 4))
 
                 @timeit to "tair_output"                       tair_output[:, :, day]                    = Array(tair_gpu)
                 @timeit to "precipitation_output"              precipitation_output[:, :, day]           = Array(prec_gpu)
 
-                println("CHECKPOINT 2")
-
                 @timeit to "Q12_processed"                     Q12_processed                             = ifelse.(abs.(Q_12) .> fillvalue_threshold, NaN, Q_12)       
                 @timeit to "Q12_output"                        Q12_output[:, :, day]                  = Array(Q_12) 
- #               @timeit to "Q12_summed_output"                 Q12_summed_output[:, :, day]              = Array(sum_with_nan_handling(Q_12, 4)) 
-
- println("CHECKPOINT 2.5")
 
                 @timeit to "soil_evaporation_output"           soil_evaporation_output[:, :, day, :]     = Array(soil_evaporation)
                 @timeit to "soil_temperature_output"           soil_temperature_output[:, :, day, :]     = Array(soil_temperature)
                 @timeit to "soil_moisture_output"              soil_moisture_output[:, :, day, :]        = Array(soil_moisture_new)
                        
-                println("CHECKPOINT 3")
-
                 @timeit to "total_et_output"                   total_et_output[:, :, day]                = Array(total_et)
                 @timeit to "total_runoff_output"               total_runoff_output[:, :, day]            = Array(total_runoff)
                 @timeit to "kappa_array_output"                kappa_array_output[:, :, day,:]           = Array(kappa_array)
@@ -314,8 +270,6 @@ function process_year(year)
                 @timeit to "potential_evaporation_output"             potential_evaporation_output[:, :, day, :] = Array(potential_evaporation_processed)
                 @timeit to "potential_evaporation_summed_output"      potential_evaporation_summed_output[:, :, day] = Array(sum_with_nan_handling(cv_gpu .* potential_evaporation, 4))
 
-                println("CHECKPOINT 4")
-
                 @timeit to "water_storage_processed"           water_storage_processed = ifelse.(abs.(water_storage) .> fillvalue_threshold, NaN, water_storage)
                 @timeit to "water_storage_output"              water_storage_output[:, :, day, :]        = Array(water_storage_processed)
                 @timeit to "water_storage_summed_output"       water_storage_summed_output[:, :, day]    = Array(sum_with_nan_handling(water_storage_processed, 4))
@@ -324,55 +278,22 @@ function process_year(year)
                 @timeit to "net_radiation_output"              net_radiation_output[:, :, day, :]        = Array(net_radiation_processed)
                 @timeit to "net_radiation_summed_output"       net_radiation_summed_output[:, :, day]    = Array(sum_with_nan_handling(cv_gpu .* net_radiation_processed, 4))
             
-                println("CHECKPOINT 5")
-
                 @timeit to "canopy_evaporation_processed"      canopy_evaporation_processed = ifelse.(abs.(canopy_evaporation) .> fillvalue_threshold, NaN, canopy_evaporation)
-                @timeit to "canopy_evaporation_output"         canopy_evaporation_output[:, :, day, :]   = Array(canopy_evaporation_processed)
+                @timeit to "canopy_evaporation_output"         canopy_evaporation_output[:, :, day, :]     = Array(canopy_evaporation_processed)
                 @timeit to "canopy_evaporation_summed_output"  canopy_evaporation_summed_output[:, :, day] = Array(sum_with_nan_handling(cv_gpu .* canopy_evaporation_processed, 4))
-            
-                println("CHECKPOINT 5.5")
-
 
                 @timeit to "max_water_storage_processed"       max_water_storage_processed = ifelse.(abs.(max_water_storage) .> fillvalue_threshold, NaN, max_water_storage)
-                @timeit to "max_water_storage_output"          max_water_storage_output[:, :, day, :]    = Array(max_water_storage_processed)
+                @timeit to "max_water_storage_output"          max_water_storage_output[:, :, day, :]     = Array(max_water_storage_processed)
                 @timeit to "max_water_storage_summed_output"   max_water_storage_summed_output[:, :, day] = Array(sum_with_nan_handling(max_water_storage_processed, 4))
 
-
-                println("CHECKPOINT 6")
-
-
-                @timeit to "wilting_point_output"              wilting_point_output[:, :, :]        = Array(wilting_point)
-                @timeit to "soil_moisture_critical_output"     soil_moisture_critical_output[:, :, :]        = Array(soil_moisture_critical)
-
-                println("CHECKPOINT 6.5")
-
+                @timeit to "wilting_point_output"              wilting_point_output[:, :, :]            = Array(wilting_point)
+                @timeit to "soil_moisture_critical_output"     soil_moisture_critical_output[:, :, :]   = Array(soil_moisture_critical)
 
                 @timeit to "soil_moisture_max_output"          soil_moisture_max_output[:, :, :]        = Array(soil_moisture_max)
-                
-
-                println("CHECKPOINT 7")
-
-                println("Shape of E_1_t: $(size(E_1_t))")
-                println("Shape of E_2_t: $(size(E_2_t))")
-                println("Shape of g_sw_1: $(size(g_sw_1))")
-                println("Shape of g_sw_2: $(size(g_sw_2))")
-                println("Shape of g_sw: $(size(g_sw))")
-                println("Shape of residual_moisture: $(size(residual_moisture))")
-
-
-                @timeit to "E_1_t_output"          E_1_t_output[:, :, day, :]       = Array(E_1_t)
-                @timeit to "E_2_t_output"          E_2_t_output[:, :, day, :]       = Array(E_2_t)
-
-                println("CHECKPOINT 7.5")
-
-                @timeit to "g_sw_output"           g_sw_output[:, :, day, :]        = Array(g_sw)
-                
-                println("CHECKPOINT 8")
-
-
-                @timeit to "residual_moisture_output"          residual_moisture_output[:, :, day, :]    = Array(residual_moisture)
-
-                println("CHECKPOINT 9")
+                @timeit to "E_1_t_output"                      E_1_t_output[:, :, day, :]               = Array(E_1_t)
+                @timeit to "E_2_t_output"                      E_2_t_output[:, :, day, :]               = Array(E_2_t)
+                @timeit to "g_sw_output"                       g_sw_output[:, :, day, :]                = Array(g_sw)
+                @timeit to "residual_moisture_output"          residual_moisture_output[:, :, day, :]   = Array(residual_moisture)
 
             end
             
