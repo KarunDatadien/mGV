@@ -72,7 +72,6 @@ function calculate_potential_evaporation(tair_gpu, vp_gpu, elev_gpu, net_radiati
 
     # Ensure potential evaporation is non-negative
     potential_evaporation = max.(potential_evaporation, 0.0)
-    println("Shape of potential_evaporation: $(size(potential_evaporation))")
 
     return potential_evaporation # [mm/day]
 end
@@ -113,7 +112,6 @@ function calculate_transpiration(
 )
     # Constants
     delta_t = 1  # seconds per day
-   # fillvalue_threshold = 1e9
 
     # Replace NaN or large values with 0.0
     potential_evaporation .= ifelse.(isnan.(potential_evaporation) .| (abs.(potential_evaporation) .> fillvalue_threshold), 0.0, potential_evaporation)
@@ -123,14 +121,14 @@ function calculate_transpiration(
     rarc_gpu .= ifelse.(isnan.(rarc_gpu) .| (abs.(rarc_gpu) .> fillvalue_threshold), 0.0, rarc_gpu)
 
     # Compute soil moisture for layers 1 and 2
-    W_1 = sum(soil_moisture_old[:, :, 1:2, :], dims=3)
-    W_2 = soil_moisture_old[:, :, 3:3, :]
+    W_1 = sum(soil_moisture_old[:, :, 1:2], dims=3)
+    W_2 = soil_moisture_old[:, :, 3:3]
 
     # Critical and wilting points for layers
-    W_1_cr = sum(soil_moisture_critical[:, :, 1:2, :], dims=3)
-    W_2_cr = soil_moisture_critical[:, :, 3:3, :]
-    W_1_star = sum(wilting_point[:, :, 1:2, :], dims=3)
-    W_2_star = wilting_point[:, :, 3:3, :]
+    W_1_cr = sum(soil_moisture_critical[:, :, 1:2], dims=3)
+    W_2_cr = soil_moisture_critical[:, :, 3:3]
+    W_1_star = sum(wilting_point[:, :, 1:2], dims=3)
+    W_2_star = wilting_point[:, :, 3:3]
 
     # Root fractions
     f_1 = sum(root_gpu[:, :, 1:2, :], dims=3)
@@ -166,7 +164,7 @@ function calculate_transpiration(
     canopy_resistance_1 = ifelse.(
         (LAI_gpu .<= 0.0) .| (g_sw_case .<= 0.0),  # no LAI or still totally dry
         HUGE_R,                                   # fully shut
-        rmin_gpu ./(LAI_gpu .* cv_gpu .* g_sw_case)        # Jarvis rmin/(LAI⋅g_sw_case)
+        rmin_gpu ./ (LAI_gpu .* g_sw_case)        # Jarvis rmin/(LAI⋅g_sw_case)
     )
 
     # Canopy resistance
@@ -249,14 +247,7 @@ function calculate_soil_evaporation(soil_moisture, soil_moisture_max, potential_
 end
 
 
-function update_water_canopy_storage(
-    water_storage,
-    prec_gpu, cv_gpu,
-    canopy_evaporation,
-    max_water_storage,
-    throughfall)
-
-    println("canopy_evaporation!!!!!!!!!!!!!!!!!!!!!: ", size(canopy_evaporation))
+function update_water_canopy_storage(water_storage, prec_gpu, cv_gpu, canopy_evaporation, max_water_storage, throughfall)
 
     # Calculate new water storage: current storage + (precipitation - canopy evaporation)
     new_water_storage = water_storage .+ (prec_gpu .* cv_gpu) .- canopy_evaporation

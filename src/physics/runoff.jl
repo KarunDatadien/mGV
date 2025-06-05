@@ -12,12 +12,6 @@ function calculate_surface_runoff(prec_gpu, throughfall, soil_moisture_old, soil
     # Compute i_0 (initial infiltration capacity) using Eq. 13
     i_0 = i_m .* (1.0 .- (1.0 .- A_sat) .^ (1.0 ./ b_i))
 
-    println("Shape of i_0: $(size(i_0))")
-    println("Shape of throughfall: $(size(throughfall))")
-    println("Shape of topsoil_moisture: $(size(topsoil_moisture))")
-    println("Shape of topsoil_moisture_max: $(size(topsoil_moisture_max))")
-
-
     # Compute runoff for vegetated layers (n = 1 to nveg) using throughfall
     total_water_input_veg = i_0 .+ sum_with_nan_handling(throughfall[:, :, :, 1:end-1], 4)
     runoff_veg = ifelse.(total_water_input_veg  .>= i_m ,
