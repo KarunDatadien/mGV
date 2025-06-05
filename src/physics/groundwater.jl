@@ -70,19 +70,35 @@ function calculate_gsm_inv(soil_moisture, soil_moisture_critical, wilting_point)
 end
 
 
-function update_topsoil_moisture(prec_gpu, throughfall, soil_moisture_old, soil_moisture_max, surface_runoff, Q_12, soil_evaporation, depth_gpu, E_1_t)
+function update_topsoil_moisture(
+    prec_gpu,
+    throughfall,
+    soil_moisture_old,
+    soil_moisture_max,
+    surface_runoff,
+    Q_12,
+    soil_evaporation,
+    depth_gpu,
+    E_1_t,
+)
 
-    # Compute updated soil moisture for vegetated layers (n = 1 to nveg) using throughfall
-    topsoil_moisture_new = (sum_with_nan_handling(throughfall[:, :, :, 1:end], 4) )  .- sum_with_nan_handling(E_1_t[:, :, :, 1:end-1], 4) .- surface_runoff[:, :, :, end:end] .- soil_evaporation .- Q_12 # TODO: is the surface_runoff correct taking just end:end
+    # Compute updated soil moisture for vegetated layers (n = 1 to nveg)
+    # Note that soil evaporation should only remove water from the first layer.
+    topsoil_moisture_new = (sum_with_nan_handling(throughfall[:, :, :, 1:end], 4)) .-
+                           sum_with_nan_handling(E_1_t[:, :, :, 1:end-1], 4) .-
+                           surface_runoff[:, :, :, end:end] .-
+                           Q_12
 
-    # Distribute topsoil_moisture_new back to layers 1 and 2 based on depth ratios
+    # Distribute the change in top soil moisture between layer 1 and 2
     total_depth = sum(depth_gpu[:, :, 1:2], dims=3)
     fraction_layer1 = depth_gpu[:, :, 1:1] ./ total_depth
     fraction_layer2 = depth_gpu[:, :, 2:2] ./ total_depth
 
-    # Apply depth ratios to all layers (n = 1 to nveg+1)
     soil_moisture_new[:, :, 1:1] = soil_moisture_old[:, :, 1:1] .+ topsoil_moisture_new .* fraction_layer1
     soil_moisture_new[:, :, 2:2] = soil_moisture_old[:, :, 2:2] .+ topsoil_moisture_new .* fraction_layer2
+
+    # Remove soil evaporation from the first layer only
+    soil_moisture_new[:, :, 1:1] .-= soil_evaporation
 
     soil_moisture_new[:, :, 1:1] = max.(0.0, min.(soil_moisture_max[:, :, 1:1], soil_moisture_new[:, :, 1:1]))
     soil_moisture_new[:, :, 2:2] = max.(0.0, min.(soil_moisture_max[:, :, 2:2], soil_moisture_new[:, :, 2:2]))
