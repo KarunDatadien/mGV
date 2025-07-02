@@ -82,31 +82,38 @@ function update_topsoil_moisture(
 
     # Compute updated soil moisture for vegetated layers (n = 1 to nveg)
     # Note that soil evaporation should only remove water from the first layer.
-    topsoil_moisture_new = (sum_with_nan_handling(throughfall[:, :, :, 1:end], 4)) .-
-                           sum_with_nan_handling(E_1_t[:, :, :, 1:end-1], 4) .-
-                           surface_runoff[:, :, :, end:end] .-
+    topsoil_moisture_addition = (sum_with_nan_handling((throughfall), 4)) .-
+                          # sum_with_nan_handling(E_1_t[:, :, :, 1:end-1], 4) .-
+                          # surface_runoff[:, :, :, end:end] .-
                            Q_12
 
-    # Update layer 1 first with any incoming water
-    soil_moisture_new[:, :, 1:1] = soil_moisture_old[:, :, 1:1] .+ topsoil_moisture_new
-    soil_moisture_new[:, :, 2:2] = soil_moisture_old[:, :, 2:2]
+    @show eltype(topsoil_moisture_addition)  # Check type after sum and subtraction
+    @show eltype(throughfall)  # Check type after initialization
 
-    # Overflow from layer 1 goes to layer 2
+    # Update layer 1 first with any incoming water
+    soil_moisture_new[:, :, 1:1] .= soil_moisture_old[:, :, 1:1] .+ topsoil_moisture_addition
+    soil_moisture_new[:, :, 2:2] .= soil_moisture_old[:, :, 2:2]
+    @show eltype(soil_moisture_new)  # Check type after layer 1 update
+
+    # Overflow from layer 1 goes to layer 2 TODO: excess needs to go to runoff?
     excess = max.(soil_moisture_new[:, :, 1:1] .- soil_moisture_max[:, :, 1:1], 0.0)
     soil_moisture_new[:, :, 1:1] .-= excess
     soil_moisture_new[:, :, 2:2] .+= excess
-
-    # Clamp layer 1 to zero if it becomes negative
-    soil_moisture_new[:, :, 1:1] = max.(soil_moisture_new[:, :, 1:1], 0.0)
+    @show eltype(soil_moisture_new)  # Check type after excess transfer
 
     # Remove soil evaporation from the first layer only
     soil_moisture_new[:, :, 1:1] .-= soil_evaporation
+    @show eltype(soil_moisture_new)  # Check type after evaporation
 
     # Constrain within physical bounds
-    soil_moisture_new[:, :, 1:1] = clamp.(soil_moisture_new[:, :, 1:1], 0.0, soil_moisture_max[:, :, 1:1])
-    soil_moisture_new[:, :, 2:2] = clamp.(soil_moisture_new[:, :, 2:2], 0.0, soil_moisture_max[:, :, 2:2])
+    soil_moisture_new[:, :, 1:1] .= clamp.(soil_moisture_new[:, :, 1:1], 0.0, soil_moisture_max[:, :, 1:1])
+    soil_moisture_new[:, :, 2:2] .= clamp.(soil_moisture_new[:, :, 2:2], 0.0, soil_moisture_max[:, :, 2:2])
+    @show eltype(soil_moisture_new)  # Check type after clamping
 
-    return soil_moisture_new
+    # Check type of returned old moisture slice
+    @show eltype(soil_moisture_old[:, :, 1:1])
+
+    return soil_moisture_new, (soil_moisture_old[:, :, 1:1])
 end
 
 
@@ -129,20 +136,23 @@ function calculate_drainage_Q12(soil_moisture_old, soil_moisture_max, ksat_gpu, 
     Q_12_sublayer = max.(Q_12_sublayer, 0.0)
 
     # Sum the contributions from the two sub-layers for each n
-    Q_12 = sum(Q_12_sublayer, dims=3) .* 0.0
+    Q_12 = sum(Q_12_sublayer, dims=3) #.* 0.0
 
     return Q_12
 end
 
 
-function update_bottomsoil_moisture(soil_moisture_new, soil_moisture_max, Q_b, Q_12, E_2_t)
+function update_bottomsoil_moisture(soil_moisture_new, soil_moisture_old, soil_moisture_max, Q_b, Q_12, E_2_t)
+    
+    soil_moisture_new = soil_moisture_old
+
     # Bottom layer is the third layer (index 3) in your 3-layer setup, for all n
     bottomsoil_moisture = soil_moisture_new[:, :, 3:3]    # W_2^-[n]
     bottomsoil_moisture_max = soil_moisture_max[:, :, 3:3]  # W_2^c
     
     # Eq. 22a: Compute new bottom soil moisture (W_2^+[n])
     # For vegetated layers (n = 1 to nveg-1), include E_2^t[n]; for bare soil (nveg), E_2 = 0
-    bottomsoil_moisture_new = bottomsoil_moisture .+ Q_12 .- Q_b .- sum_with_nan_handling(E_2_t[:, :, :, 1:end-1], 4) 
+    bottomsoil_moisture_new = bottomsoil_moisture .+ Q_12 .- Q_b #.- sum_with_nan_handling(E_2_t[:, :, :, 1:end-1], 4) # TODO: add E_2_t
 
     # Ensure non-negative moisture
     bottomsoil_moisture_new = max.(0.0, min.(bottomsoil_moisture_max, bottomsoil_moisture_new))
@@ -168,5 +178,5 @@ function update_bottomsoil_moisture(soil_moisture_new, soil_moisture_max, Q_b, Q
     # Update the full soil_moisture_old array with the new bottom layer values
     soil_moisture_new[:, :, 3:3] = bottomsoil_moisture_new
 
-    return soil_moisture_new[:, :, 3:3], subsurface_runoff_total
+    return soil_moisture_new, subsurface_runoff_total
 end

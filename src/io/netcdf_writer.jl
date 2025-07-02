@@ -32,7 +32,6 @@ function create_output_netcdf(output_file::String, reference_array, reference_ar
     precipitation_output.attrib["description"] = "Daily precipitation"
     #precipitation_output.attrib["_FillValue"] = float_type(NaN)
 
-
     throughfall_output = defVar(out_ds, "throughfall_output", float_type, ("lon", "lat", "time", "nveg"))
     throughfall_output.attrib["units"]       = "mm/day"
     throughfall_output.attrib["description"] = "Daily throughfall per vegetation"
@@ -150,6 +149,8 @@ function create_output_netcdf(output_file::String, reference_array, reference_ar
     g_sw_2_output = defVar(out_ds, "g_sw_2_output", float_type, ("lon", "lat", "time", "nveg"))
     g_sw_output = defVar(out_ds, "g_sw_output", float_type, ("lon", "lat", "time", "nveg"))
 
+    topsoil_moisture_addition_output = defVar(out_ds, "topsoil_moisture_addition_output", float_type, ("lon", "lat", "time"))
+
 
     return out_ds, precipitation_output, water_storage_output, water_storage_summed_output, Q12_output, 
            tair_output, tsurf_output, canopy_evaporation_output,
@@ -158,6 +159,7 @@ function create_output_netcdf(output_file::String, reference_array, reference_ar
            net_radiation_summed_output, max_water_storage_output, max_water_storage_summed_output,
            soil_evaporation_output, soil_temperature_output, soil_moisture_output,  total_et_output, total_runoff_output,
            kappa_array_output, cs_array_output, wilting_point_output, soil_moisture_max_output, soil_moisture_critical_output,
-           E_1_t_output, E_2_t_output, g_sw_1_output, g_sw_2_output, g_sw_output, residual_moisture_output, throughfall_output, throughfall_summed_output
+           E_1_t_output, E_2_t_output, g_sw_1_output, g_sw_2_output, g_sw_output, residual_moisture_output, 
+           throughfall_output, throughfall_summed_output, topsoil_moisture_addition_output
 
 end

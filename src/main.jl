@@ -58,7 +58,7 @@ global porosity      = CUDA.zeros(float_type, size(bulk_dens_gpu))
 global soil_temperature = CUDA.zeros(float_type, size(soil_dens_gpu))
 global Lsum = CUDA.zeros(float_type, size(soil_dens_gpu))
 global tsurf = CUDA.zeros(float_type, size(d0_gpu))
-global tsurf_n = CUDA.zeros(float_type, size(albedo_gpu))
+global Q_12 = CUDA.zeros(float_type, size(Tavg_gpu))
 
 global soil_moisture_old = CUDA.zeros(float_type, size(soil_dens_gpu, 1), size(soil_dens_gpu, 2), size(soil_dens_gpu, 3))
 global soil_moisture_new = CUDA.zeros(float_type, size(soil_dens_gpu, 1), size(soil_dens_gpu, 2), size(soil_dens_gpu, 3))
@@ -82,8 +82,8 @@ println("Soil moisture at position [4,22,1]: ", Array(soil_moisture_new[4:4, 22:
 function process_year(year)
 
     # Ensure we're modifying the global variables
-    global water_storage, throughfall, canopy_evaporation, bulk_dens_min, soil_dens_min, porosity, soil_moisture_old, 
-           soil_moisture_new, soil_moisture_max, soil_moisture_critical, field_capacity, wilting_point, residual_moisture, soil_temperature, Lsum, tsurf, tsurf_n
+    global water_storage, throughfall, canopy_evaporation, bulk_dens_min, soil_dens_min, porosity, soil_moisture_old, Q_12,
+           soil_moisture_new, soil_moisture_max, soil_moisture_critical, field_capacity, wilting_point, residual_moisture, soil_temperature, Lsum, tsurf
 
     println("============ Start run for year: $year ============")
     println("Loading forcing data and allocating memory...")
@@ -106,10 +106,11 @@ function process_year(year)
           net_radiation_summed_output, max_water_storage_output, max_water_storage_summed_output,
           soil_evaporation_output, soil_temperature_output, soil_moisture_output, total_et_output, total_runoff_output, 
           kappa_array_output, cs_array_output, wilting_point_output, soil_moisture_max_output, soil_moisture_critical_output,
-          E_1_t_output, E_2_t_output, g_sw_1_output, g_sw_2_output, g_sw_output, residual_moisture_output, throughfall_output, throughfall_summed_output =
+          E_1_t_output, E_2_t_output, g_sw_1_output, g_sw_2_output, g_sw_output, residual_moisture_output, 
+          throughfall_output, throughfall_summed_output, topsoil_moisture_addition_output =
           create_output_netcdf(output_file, prec_cpu, LAI_cpu, float_type, lat_cpu, lon_cpu)
 
-println("Soil moisture at position [4,22,1]: ", Array(soil_moisture_new[4:4, 22:22, 1:1])[1])
+println("Soil moisture at position [3,21,1]: ", Array(soil_moisture_new[4:4, 22:22, 1:1])[1])
     println("Running...") 
     num_days = size(prec_cpu, 3)
     day_prev = 0
@@ -152,9 +153,11 @@ println("Soil moisture at position [4,22,1]: ", Array(soil_moisture_new[4:4, 22:
             @timeit to "calculate_canopy_evaporation" canopy_evaporation = calculate_canopy_evaporation(
                 water_storage, max_water_storage, potential_evaporation, aerodynamic_resistance, rarc_gpu, prec_gpu, cv_gpu
             ) # Eq. (1), (9) and (10), works ✅
-println("1 Soil moisture at position [4,22,1]: ", Array(soil_moisture_new[4:4, 22:22, 1:1])[1])
+
             soil_moisture_old = soil_moisture_new
-println("2 Soil moisture at position [4,22,1]: ", Array(soil_moisture_new[4:4, 22:22, 1:1])[1])
+
+
+            # TODO: transpiration, E_1_t and E_2_t output gives missing values on parts of the grid
             @timeit to "calculate_transpiration" transpiration, E_1_t, E_2_t, g_sw_1, g_sw_2, g_sw = calculate_transpiration(
                 potential_evaporation, aerodynamic_resistance, rarc_gpu, 
                 water_storage, max_water_storage, soil_moisture_old, soil_moisture_critical, wilting_point, 
@@ -174,10 +177,10 @@ println("2 Soil moisture at position [4,22,1]: ", Array(soil_moisture_new[4:4, 2
             ) # Eq. (18a) and (18b)
 
             # Drainage from layer 1 to 2; Q12
-            @timeit to "calculate_drainage_Q12" Q_12 = calculate_drainage_Q12(soil_moisture_old, soil_moisture_max, ksat_gpu, residual_moisture, expt_gpu) # Eq. (20) TODO: check if expt_gpu is correct?
+        #    @timeit to "calculate_drainage_Q12" Q_12 = calculate_drainage_Q12(soil_moisture_old, soil_moisture_max, ksat_gpu, residual_moisture, expt_gpu) # Eq. (20) TODO: check if expt_gpu is correct?
 
             # Water balance toplayer update 
-            @timeit to "update_topsoil_moisture" soil_moisture_new = update_topsoil_moisture(
+            @timeit to "update_topsoil_moisture" soil_moisture_new, topsoil_moisture_addition = update_topsoil_moisture(
                 throughfall, soil_moisture_old, soil_moisture_max,
                 surface_runoff, Q_12, soil_evaporation, E_1_t
             )
@@ -186,8 +189,8 @@ println("2 Soil moisture at position [4,22,1]: ", Array(soil_moisture_new[4:4, 2
             @timeit to "calculate_subsurface_runoff" subsurface_runoff = calculate_subsurface_runoff(soil_moisture_old, soil_moisture_max, Ds_gpu, Dsmax_gpu, Ws_gpu) # Eq. (21)           
 
             # Update bottom soil moisture and get total subsurface runoff
-            @timeit to "update_bottomsoil_moisture" soil_moisture_new[:, :, 3:3], subsurface_runoff_total = update_bottomsoil_moisture(
-                soil_moisture_new, soil_moisture_max, subsurface_runoff, Q_12, E_2_t
+            @timeit to "update_bottomsoil_moisture" soil_moisture_new, subsurface_runoff_total = update_bottomsoil_moisture(
+                soil_moisture_new, soil_moisture_old, soil_moisture_max, subsurface_runoff, Q_12, E_2_t
             ) # Eq. (22), TODO: compare this with the paper
 
             # Section 2.5
@@ -198,12 +201,11 @@ println("2 Soil moisture at position [4,22,1]: ", Array(soil_moisture_new[4:4, 2
 
             @timeit to "Set ice_frac sum"        ice_frac         = 0.0
             
-            @timeit to "soil_conductivity"       kappa_array      = soil_conductivity(
-                                                                   sum_with_nan_handling(cv_gpu .* soil_moisture_new, 4), ice_frac, soil_dens_min,
+            @timeit to "soil_conductivity"       kappa_array      = soil_conductivity( soil_moisture_new, ice_frac, soil_dens_min,
                                                                    bulk_dens_min, quartz_gpu, organic_frac, porosity)
             @timeit to "volumetric_heat_capacity" cs_array        = volumetric_heat_capacity(
                                                                    bulk_dens_gpu ./ soil_dens_gpu,
-                                                                   sum_with_nan_handling(cv_gpu .* soil_moisture_new, 4) ./ rho_w, ice_frac, organic_frac)
+                                                                   soil_moisture_new ./ rho_w, ice_frac, organic_frac)
             @timeit to "estimate_layer_temperature" soil_temperature = estimate_layer_temperature(
                                                                    depth_gpu, dp_gpu, tsurf, soil_temperature, Tavg_gpu)
             
@@ -264,8 +266,8 @@ println("3 BEFORE OUTPUT Soil moisture at position [4,22,1]: ", Array(soil_moist
                 @timeit to "throughfall_output"                throughfall_output[:, :, day, :]          = Array(throughfall)
                 @timeit to "throughfall_summed_output"         throughfall_summed_output[:, :, day]      = Array(sum_with_nan_handling(throughfall, 4))
 
-                @timeit to "Q12_processed"                     Q12_processed                             = ifelse.(abs.(Q_12) .> fillvalue_threshold, NaN, Q_12)       
-                @timeit to "Q12_output"                        Q12_output[:, :, day]                     = Array(Q_12) 
+                @timeit to "Q12_processed"                     Q12_processed = ifelse.(abs.(Q_12) .> fillvalue_threshold, Float32(0.0), Q_12)
+                @timeit to "Q12_output"                        Q12_output[:, :, day]                     = Array(Q12_processed) 
 
                 @timeit to "soil_evaporation_output"           soil_evaporation_output[:, :, day, :]     = Array(soil_evaporation)
                 @timeit to "soil_temperature_output"           soil_temperature_output[:, :, day, :]     = Array(soil_temperature)
@@ -305,6 +307,8 @@ println("3 BEFORE OUTPUT Soil moisture at position [4,22,1]: ", Array(soil_moist
                 @timeit to "g_sw_output"                       g_sw_output[:, :, day, :]                = Array(g_sw)
                 @timeit to "residual_moisture_output"          residual_moisture_output[:, :, day, :]   = Array(residual_moisture)
 
+                @timeit to "topsoil_moisture_addition_output"          topsoil_moisture_addition_output[:, :, day]   = Array(topsoil_moisture_addition)
+
             end
             
         end # gpu use
@@ -314,6 +318,7 @@ println("3 BEFORE OUTPUT Soil moisture at position [4,22,1]: ", Array(soil_moist
     end # timeit year loop
 
     end # year loop
+
 
     println("Closing output file...")
     @timeit to "closing outputfile" close(out_ds)
