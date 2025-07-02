@@ -92,3 +92,4 @@ function sum_with_nan_handling(arr::CuArray, dim::Int)
     
     return summed
 end
+

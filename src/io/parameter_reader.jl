@@ -44,6 +44,48 @@ function read_and_allocate_parameter(varname::String)
     end
 end
 
+# This macro automates the creation of the CPU and GPU variables
+macro load_params(vars...)
+    quote
+        # The `esc(...)` is what allows the macro to create variables
+        # in the scope where you call it.
+        $(map(vars) do var
+            cpu_name = Symbol(String(var), "_cpu")
+            gpu_name = Symbol(String(var), "_gpu")
+            source_var = Symbol(String(var), "_var")
+            
+            # This generates the line: (var_cpu, var_gpu) = read_and_allocate_parameter(var_var)
+            :(($(esc(cpu_name)), $(esc(gpu_name))) = read_and_allocate_parameter($(esc(source_var))))
+        end...)
+    end
+end
+
+
+"""
+    @vars(names...)
+
+Takes a list of base variable names and expands them into two lists:
+one with a `_cpu` suffix and one with a `_gpu` suffix.
+Returns a tuple containing the two lists.
+"""
+macro vars(names...)
+    # Create a list of symbols with the `_cpu` suffix
+    cpu_vars = [Symbol(String(name), "_cpu") for name in names]
+    # Create a list of symbols with the `_gpu` suffix
+    gpu_vars = [Symbol(String(name), "_gpu") for name in names]
+    
+    # The `esc()` is crucial for the macro to access the variables
+    # from the scope where it is called.
+    # We construct two array expressions, e.g., `[var1_cpu, var2_cpu]`
+    # and `[var1_gpu, var2_gpu]`.
+    quote
+        ( [$(esc.(cpu_vars)...)], [$(esc.(gpu_vars)...)] )
+    end
+end
+
+
+
+
 function read_and_allocate_forcing(prefix::String, year::Int, varname::String)
     println("Loading $varname forcing input...")
 
@@ -60,6 +102,32 @@ function read_and_allocate_forcing(prefix::String, year::Int, varname::String)
         return cpu_preload, gpu_arr
     else
         return cpu_preload, nothing
+    end
+end
+
+"""
+    @load_forcing(year_var, names...)
+
+Takes a year variable and a list of base variable names. For each name,
+it generates a call to `read_and_allocate_forcing`, creating the
+corresponding `_cpu` and `_gpu` variables.
+"""
+macro load_forcing(year_var, names...)
+    # The `quote ... end` block collects all the generated lines of code.
+    quote
+        # `map` iterates through each variable name provided (e.g., :prec, :tair)
+        $(map(names) do name
+            # Construct all the necessary variable names from the base name
+            cpu_var      = esc(Symbol(String(name), "_cpu"))
+            gpu_var      = esc(Symbol(String(name), "_gpu"))
+            prefix_var   = esc(Symbol("input_", String(name), "_prefix"))
+            source_var   = esc(Symbol(String(name), "_var"))
+            year_esc     = esc(year_var)
+
+            # This is the line of code that will be generated for each name:
+            # e.g., (prec_cpu, prec_gpu) = read_and_allocate_forcing(input_prec_prefix, year, prec_var)
+            :(($cpu_var, $gpu_var) = read_and_allocate_forcing($prefix_var, $year_esc, $source_var))
+        end...)
     end
 end
 

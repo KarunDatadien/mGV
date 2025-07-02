@@ -4,47 +4,18 @@ const to = TimerOutputs.TimerOutput()
 println("Loading parameter data and allocating memory...")
 
 @time begin
-    (lat_cpu,        lat_gpu)         = read_and_allocate_parameter(lat_var)
-    (lon_cpu,        lon_gpu)         = read_and_allocate_parameter(lon_var)
-
-    (d0_cpu,         d0_gpu)         = read_and_allocate_parameter(d0_var)
-    (z0_cpu,         z0_gpu)         = read_and_allocate_parameter(z0_var)
-    (z0soil_cpu,     z0soil_gpu)     = read_and_allocate_parameter(z0soil_var)
-    (LAI_cpu,        LAI_gpu)        = read_and_allocate_parameter(LAI_var)
-    (albedo_cpu,     albedo_gpu)     = read_and_allocate_parameter(albedo_var) 
-    (rmin_cpu,       rmin_gpu)       = read_and_allocate_parameter(rmin_var) 
-    (rarc_cpu,       rarc_gpu)       = read_and_allocate_parameter(rarc_var) 
-    (cv_cpu,         cv_gpu)         = read_and_allocate_parameter(cv_var) 
-    (elev_cpu,       elev_gpu)       = read_and_allocate_parameter(elev_var) 
-    (ksat_cpu,       ksat_gpu)       = read_and_allocate_parameter(ksat_var) 
-    (residmoist_cpu, residmoist_gpu) = read_and_allocate_parameter(residmoist_var) 
-    (init_moist_cpu, init_moist_gpu) = read_and_allocate_parameter(init_moist_var) 
-    (root_cpu,       root_gpu)       = read_and_allocate_parameter(root_var) 
-    (Wcr_cpu,        Wcr_gpu)        = read_and_allocate_parameter(Wcr_var)
-    (Wfc_cpu,        Wfc_gpu)        = read_and_allocate_parameter(Wfc_var)
-    (Wpwp_cpu,       Wpwp_gpu)       = read_and_allocate_parameter(Wpwp_var)
-    (depth_cpu,      depth_gpu)      = read_and_allocate_parameter(depth_var)
-    (quartz_cpu,     quartz_gpu)     = read_and_allocate_parameter(quartz_var)
-    (bulk_dens_cpu,  bulk_dens_gpu)  = read_and_allocate_parameter(bulk_dens_var)
-    (soil_dens_cpu,  soil_dens_gpu)  = read_and_allocate_parameter(soil_dens_var)
-    (expt_cpu,       expt_gpu)       = read_and_allocate_parameter(expt_var)
-    (coverage_cpu,   coverage_gpu)   = read_and_allocate_parameter(coverage_var)
-    (b_infilt_cpu,   b_infilt_gpu)   = read_and_allocate_parameter(b_infilt_var)   
-    (Ds_cpu,         Ds_gpu)         = read_and_allocate_parameter(Ds_var)   
-    (Dsmax_cpu,      Dsmax_gpu)      = read_and_allocate_parameter(Dsmax_var)   
-    (Ws_cpu,         Ws_gpu)         = read_and_allocate_parameter(Ws_var)   
-    (dp_cpu,         dp_gpu)         = read_and_allocate_parameter(dp_var)
-    (Tavg_cpu,       Tavg_gpu)       = read_and_allocate_parameter(Tavg_var)
+    @load_params(
+        lat, lon, d0, z0, z0soil, LAI, albedo, rmin, rarc, cv, elev,
+        ksat, residmoist, init_moist, root, Wcr, Wfc, Wpwp, depth,
+        quartz, bulk_dens, soil_dens, expt, coverage, b_infilt,
+        Ds, Dsmax, Ws, dp, Tavg
+    )
 end
 
-gpu_load_static_inputs([rmin_cpu, rarc_cpu, cv_cpu, elev_cpu, ksat_cpu, residmoist_cpu, init_moist_cpu, root_cpu,
-                        Wcr_cpu, Wfc_cpu, Wpwp_cpu, depth_cpu, quartz_cpu,
-                        bulk_dens_cpu, soil_dens_cpu, expt_cpu, b_infilt_cpu,
-                        Ds_cpu, Dsmax_cpu, Ws_cpu, dp_cpu, Tavg_cpu, z0soil_cpu],
-                       [rmin_gpu, rarc_gpu, cv_gpu, elev_gpu, ksat_gpu, residmoist_gpu, init_moist_gpu, root_gpu,
-                        Wcr_gpu, Wfc_gpu, Wpwp_gpu, depth_gpu, quartz_gpu,
-                        bulk_dens_gpu, soil_dens_gpu, expt_gpu, b_infilt_gpu,
-                        Ds_gpu, Dsmax_gpu, Ws_gpu, dp_gpu, Tavg_gpu, z0soil_gpu])
+@timeit to "gpu_load_static_inputs" gpu_load_static_inputs(@vars(
+    rmin, rarc, cv, elev, ksat, residmoist, init_moist, root, Wcr, Wfc, Wpwp,
+    depth, quartz, bulk_dens, soil_dens, expt, b_infilt, Ds, Dsmax, Ws, dp, Tavg, z0soil
+)...)
 
 reshape_static_inputs!()
 
@@ -88,12 +59,7 @@ function process_year(year)
     println("============ Start run for year: $year ============")
     println("Loading forcing data and allocating memory...")
     @time begin
-        (prec_cpu,   prec_gpu)    = read_and_allocate_forcing(input_prec_prefix,    year, prec_var)
-        (tair_cpu,   tair_gpu)    = read_and_allocate_forcing(input_tair_prefix,    year, tair_var)
-        (wind_cpu,   wind_gpu)    = read_and_allocate_forcing(input_wind_prefix,    year, wind_var)
-        (vp_cpu,     vp_gpu)      = read_and_allocate_forcing(input_vp_prefix,      year, vp_var)
-        (swdown_cpu, swdown_gpu)  = read_and_allocate_forcing(input_swdown_prefix,  year, swdown_var)
-        (lwdown_cpu, lwdown_gpu)  = read_and_allocate_forcing(input_lwdown_prefix,  year, lwdown_var)
+        @load_forcing year prec tair wind vp swdown lwdown
     end
 
     println("Opening output file...")
@@ -123,12 +89,8 @@ println("Soil moisture at position [3,21,1]: ", Array(soil_moisture_new[4:4, 22:
         
         if GPU_USE == true
             # Explicitly copy preloaded data to the GPU
-            @timeit to "gpu_load_monthly_inputs" gpu_load_monthly_inputs(month, month_prev, 
-                                    [d0_cpu, z0_cpu, LAI_cpu, albedo_cpu, coverage_cpu], 
-                                    [d0_gpu, z0_gpu, LAI_gpu, albedo_gpu, coverage_gpu])
-            @timeit to "gpu_load_daily_inputs" gpu_load_daily_inputs(day, day_prev, 
-                                  [prec_cpu, tair_cpu, wind_cpu, vp_cpu, swdown_cpu, lwdown_cpu], 
-                                  [prec_gpu, tair_gpu, wind_gpu, vp_gpu, swdown_gpu, lwdown_gpu])
+            @timeit to "gpu_load_monthly_inputs" gpu_load_monthly_inputs(month, month_prev, @vars(d0, z0, LAI, albedo, coverage)...)
+            @timeit to "gpu_load_daily_inputs" gpu_load_daily_inputs(day, day_prev, @vars(prec, tair, wind, vp, swdown, lwdown)...)
 
             # For the first timestep we set tsurf = tair (see page 14,421 of Liang et al. (1994)):
             if day == 1 && year == start_year 
