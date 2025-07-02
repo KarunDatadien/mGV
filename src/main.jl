@@ -8,7 +8,7 @@ println("Loading parameter data and allocating memory...")
         lat, lon, d0, z0, z0soil, LAI, albedo, rmin, rarc, cv, elev,
         ksat, residmoist, init_moist, root, Wcr, Wfc, Wpwp, depth,
         quartz, bulk_dens, soil_dens, expt, coverage, b_infilt,
-        Ds, Dsmax, Ws, dp, Tavg
+        Ds, Dsmax, Ws, dp, Tavg, c_expt
     )
 end
 
@@ -139,7 +139,7 @@ println("Soil moisture at position [3,21,1]: ", Array(soil_moisture_new[4:4, 22:
             ) # Eq. (18a) and (18b)
 
             # Drainage from layer 1 to 2; Q12
-        #    @timeit to "calculate_drainage_Q12" Q_12 = calculate_drainage_Q12(soil_moisture_old, soil_moisture_max, ksat_gpu, residual_moisture, expt_gpu) # Eq. (20) TODO: check if expt_gpu is correct?
+            @timeit to "calculate_drainage_Q12" Q_12 = calculate_drainage_Q12(soil_moisture_old, soil_moisture_max, ksat_gpu, residual_moisture, expt_gpu) # Eq. (20) TODO: check if expt_gpu is correct?
 
             # Water balance toplayer update 
             @timeit to "update_topsoil_moisture" soil_moisture_new, topsoil_moisture_addition = update_topsoil_moisture(
@@ -228,7 +228,7 @@ println("3 BEFORE OUTPUT Soil moisture at position [4,22,1]: ", Array(soil_moist
                 @timeit to "throughfall_output"                throughfall_output[:, :, day, :]          = Array(throughfall)
                 @timeit to "throughfall_summed_output"         throughfall_summed_output[:, :, day]      = Array(sum_with_nan_handling(throughfall, 4))
 
-                @timeit to "Q12_processed"                     Q12_processed = ifelse.(abs.(Q_12) .> fillvalue_threshold, Float32(0.0), Q_12)
+                @timeit to "Q12_processed"                     Q12_processed = ifelse.(abs.(Q_12) .> fillvalue_threshold, 0.0, Q_12)
                 @timeit to "Q12_output"                        Q12_output[:, :, day]                     = Array(Q12_processed) 
 
                 @timeit to "soil_evaporation_output"           soil_evaporation_output[:, :, day, :]     = Array(soil_evaporation)

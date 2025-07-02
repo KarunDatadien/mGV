@@ -215,36 +215,82 @@ function calculate_transpiration(
 end
 
 
+
+#TODO: investigate issue and cleanup function below
+# Issue: SOIL EVAP WARNING: Found 402 cells where topsoil_moisture_max is zero. This will cause division by zero.
+
+# You might need to import the Printf module to use @printf
+using Printf
+
 function calculate_soil_evaporation(soil_moisture, soil_moisture_max, potential_evaporation, b_i, cv_gpu)
-    # Sum the soil moisture and maximum soil moisture across the top two layers
+    # A small epsilon to prevent division by zero in a numerically stable way.
+    # Using a value appropriate for Float32.
+    EPSILON = 1.0f-9 
+
+    # Sum the soil moisture and maximum soil moisture across the top layer(s)
     topsoil_moisture = sum(soil_moisture[:, :, 1:1, end:end], dims=3)
     topsoil_moisture_max = sum(soil_moisture_max[:, :, 1:1, end:end], dims=3)
 
-    # Compute the saturated area fraction
-    A_sat = 1.0 .- (1.0 .- topsoil_moisture ./ topsoil_moisture_max) .^ b_i
+    # ====================================================================
+    # DIAGNOSTIC CHECKS: Find and report the root causes of instability
+    # ====================================================================
+    
+    # Check 1: Detect potential for division by zero.
+    # We count how many cells have a max capacity of zero.
+    num_zero_max = CUDA.sum(topsoil_moisture_max .== 0.0f0)
+    if num_zero_max > 0
+        # Print a warning if this condition is met.
+        @printf("SOIL EVAP WARNING: Found %d cells where topsoil_moisture_max is zero. This will cause division by zero.\n", num_zero_max)
+    end
+
+    # Check 2: Detect moisture ratios > 1. This is the most common cause of NaNs
+    # in power functions like the one used for A_sat. It happens when
+    # `topsoil_moisture` slightly exceeds `topsoil_moisture_max` due to floating point errors.
+    num_ratio_gt_one = CUDA.sum(topsoil_moisture .> topsoil_moisture_max)
+    if num_ratio_gt_one > 0
+        @printf("SOIL EVAP WARNING: Found %d cells where moisture > max_moisture. This leads to taking the power of a negative number.\n", num_ratio_gt_one)
+    end
+
+    # ====================================================================
+    # NUMERICAL SAFEGUARDS: Apply fixes to prevent NaNs
+    # ====================================================================
+
+    # Safeguard 1: Add epsilon to the denominator and clamp the ratio.
+    # This simultaneously prevents division-by-zero and ensures the base of the
+    # power function below is never negative.
+    moisture_ratio = topsoil_moisture ./ (topsoil_moisture_max .+ EPSILON)
+    safe_moisture_ratio = clamp.(moisture_ratio, 0.0f0, 1.0f0)
+
+    # Compute the saturated area fraction using the sanitized ratio.
+    A_sat = 1.0f0 .- (1.0f0 .- safe_moisture_ratio) .^ b_i
+    # Clamp the result as an extra precaution.
+    A_sat = clamp.(A_sat, 0.0f0, 1.0f0)
 
     # Compute the unsaturated area fraction
-    x = 1.0 .- A_sat
+    x = 1.0f0 .- A_sat
 
+    # Initialize S_series with ones.
     S_series = CUDA.ones(float_type, size(x))
 
-    # Approximate the series expansion from eq. (15) using the first 30 terms
+    # Approximate the series expansion. This is now safe because `x` is guaranteed non-negative.
     for n = 1:30
         S_series .+= (b_i ./ (n .+ b_i)) .* x .^ (n ./ b_i)
     end
 
-    i_m = (1.0 .+ b_i) .* topsoil_moisture_max  # Max infiltration, Eq. 17 rewritten
-    i_0 = i_m .* (1.0 .- (1.0 .- A_sat) .^ (1.0 ./ b_i))  # Eq. 13
+    # Safeguard 2: Calculate the infiltration ratio directly and safely.
+    # Since A_sat is clamped, this calculation is now safe from NaNs.
+    infiltration_ratio = 1.0f0 .- (1.0f0 .- A_sat) .^ (1.0f0 ./ b_i)
 
     # Unsaturated evaporation contribution
-    Ev_unsat = potential_evaporation[:, :, :, end:end]  .* i_0 ./ i_m .* x .* S_series
+    Ev_unsat = potential_evaporation[:, :, :, end:end] .* infiltration_ratio .* x .* S_series
 
     # Saturated evaporation contribution
-    Ev_sat = potential_evaporation[:, :, :, end:end] .* A_sat # .* cv_gpu[:, :, :, end:end]
+    Ev_sat = potential_evaporation[:, :, :, end:end] .* A_sat
 
     # Total soil evaporation
-    return (Ev_sat .+ Ev_unsat) 
+    return Ev_sat .+ Ev_unsat
 end
+
 
 
 function update_water_canopy_storage(water_storage, prec_gpu, cv_gpu, canopy_evaporation, max_water_storage, throughfall)
