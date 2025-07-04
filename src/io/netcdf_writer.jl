@@ -50,7 +50,7 @@ function create_output_netcdf(output_file::String, reference_array, reference_ar
 
     Q12_output = defVar(out_ds, "Q12_output", float_type, ("lon", "lat", "time"))
     Q12_output.attrib["units"] = "mm"
-    Q12_output.attrib["description"] = "Drainage from layer 1 to layer 2 per vegetation"
+    Q12_output.attrib["description"] = "Interlayer drainage"
     
     tair_output = defVar(out_ds, "tair_output", float_type, ("lon", "lat", "time"), chunksizes = (36, 36, 1))
     tair_output.attrib["units"] = "°C"
