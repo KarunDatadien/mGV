@@ -7,6 +7,7 @@ function create_output_netcdf(output_file::String, reference_array, reference_ar
     defDim(out_ds, "lat",   size(reference_array, 2))
     defDim(out_ds, "time",  size(reference_array, 3))
     defDim(out_ds, "nveg",  size(reference_array2, 4))
+    defDim(out_ds, "qlayers", 2)
     defDim(out_ds, "layer", 3)
     defDim(out_ds, "top_layer", 1)
 
@@ -48,7 +49,7 @@ function create_output_netcdf(output_file::String, reference_array, reference_ar
     water_storage_summed_output.attrib["units"] = "mm"
     water_storage_summed_output.attrib["description"] = "Total water stored in the canopy"
 
-    Q12_output = defVar(out_ds, "Q12_output", float_type, ("lon", "lat", "time"))
+    Q12_output = defVar(out_ds, "Q12_output", float_type, ("lon", "lat", "time", "qlayers"))
     Q12_output.attrib["units"] = "mm"
     Q12_output.attrib["description"] = "Interlayer drainage"
     

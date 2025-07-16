@@ -76,15 +76,52 @@ end
 Calculates the gravitational drainage (flux) between two soil layers based on the
 Brooks-Corey formulation used in the VIC model.
 """
-function calculate_interlayer_drainage(Ksat, current_moisture, max_moisture, Wfc, expt)
-    effective_moisture = current_moisture .- Wfc
-    denominator = max_moisture .- Wfc
-    EPSILON = 1.0f-9
-    drainage_ratio = effective_moisture ./ (denominator .+ EPSILON)
+function calculate_interlayer_drainage(Ksat, current_moisture, max_moisture, residual_moisture, expt)
+    drainage_ratio = (current_moisture .- residual_moisture) ./ (max_moisture .- residual_moisture)
     drainage_ratio = clamp.(drainage_ratio, 0.0f0, 1.0f0)
     Q12 = Ksat .* drainage_ratio .^ expt
     return clamp.(Q12, 0.0f0, Inf32)
 end
+
+#function calculate_interlayer_drainage(
+#    Ksat,
+#    current_moisture,
+#    residual_moisture,
+#    max_moisture,
+#    expt
+#)
+#    # Epsilon for numerical stability
+#    EPSILON = float_type(1e-9)
+#
+#    # Effective moisture above residual
+#    eff_moist = max.(current_moisture .- residual_moisture, 0.0f0)
+#    max_eff_moist = max.(max_moisture .- residual_moisture, EPSILON)
+#
+#    # Term 1: (initial effective moisture)^{1 - expt}
+#    term1 = (eff_moist .+ EPSILON) .^ (1.0f0 .- expt)
+#
+#    # Drainage potential over the time step: Ksat / (max_eff_moist ^ expt) * (1 - expt)
+#drainage_potential = (Ksat ./ (max_eff_moist .^ expt)) .* (expt .- 1.0f0)
+#
+#    # Inner power base: term1 - drainage_potential
+#    inner_pow_base = term1 .- drainage_potential
+#
+#    # Clamp inner_pow_base to prevent negative base in power
+#    inner_pow_base = max.(inner_pow_base, 0.0f0)
+#
+#    # New effective moisture after drainage: (inner_pow_base)^{1 / (1 - expt)}
+#    # Handle expt ==1 special case (linear drainage)
+#    inv_denom = 1.0f0 ./ (1.0f0 .- expt .+ EPSILON)
+#    final_eff_moist = inner_pow_base .^ inv_denom
+#
+#    # Total drainage: initial eff_moist - final_eff_moist
+#    Q12 = eff_moist .- final_eff_moist
+#
+#    # Ensure drainage is non-negative and doesn't exceed available eff_moist
+#    Q12 = clamp.(Q12, 0.0f0, eff_moist)
+#
+#    return clamp.(Q12, 0.0f0, Inf32)
+#end
 
 
 """
@@ -139,7 +176,6 @@ function solve_runoff_and_drainage(
     soil_evaporation,    # Evaporation from each layer, per veg type (4D array)
     transpiration,       # Transpiration from each layer, per veg type (4D array)
     soil_moisture_old,   # Moisture from previous step (3D array)
-    Wfc_gpu,             # Field capacity (3D array)
     soil_moisture_max,   # Max moisture (porosity) (3D array)
     ksat_gpu,            # Saturated hydraulic conductivity (3D array)
     residual_moisture,   # Residual moisture (3D array)
@@ -147,70 +183,85 @@ function solve_runoff_and_drainage(
     # ARNO baseflow parameters for the bottom layer
     Dsmax_gpu, Ds_gpu, Ws_gpu, c_expt_gpu # These are 2D arrays
 )
-    
+
     num_layers = size(soil_moisture_old, 3)
-    
+
     # 1. Calculate drainage flux between all upper layers (1 to N-1)
-    # Note: This will be an empty array if num_layers is 1.
+    # These are fluxes OUT of the upper layer, and INTO the lower layer.
     Q12 = CUDA.zeros(Float32, size(surface_inflow, 1), size(surface_inflow, 2), num_layers - 1)
     for l in 1:(num_layers - 1)
         Q12[:, :, l] = calculate_interlayer_drainage(
             ksat_gpu[:, :, l], soil_moisture_old[:, :, l],
-            soil_moisture_max[:, :, l], Wfc_gpu[:, :, l], expt_gpu[:, :, l]
+            soil_moisture_max[:, :, l], residual_moisture[:, :, l], expt_gpu[:, :, l]
         )
     end
-    
+
     # 2. Calculate baseflow exiting the bottom layer (N)
     baseflow = calculate_baseflow(
         soil_moisture_old[:, :, num_layers], residual_moisture[:, :, num_layers],
         soil_moisture_max[:, :, num_layers], Dsmax_gpu, Ds_gpu, Ws_gpu, c_expt_gpu
     )
-    
-    # Aggregate fluxes across all vegetation types before subtraction
-    total_transpiration_per_layer = sum(transpiration, dims=4)[:,:,:,1]
-    total_soil_evaporation_per_layer = sum(soil_evaporation, dims=4)[:,:,:,1]
 
-    # 3. Update soil moisture in a cascade from top to bottom
+    # Aggregate fluxes across all vegetation types, padding for layers
+    transp_layers = size(transpiration, 3)
+    total_transpiration_per_layer = CUDA.zeros(Float32, size(soil_moisture_old))
+    # Sum over vegetation types and assign to the correct layers.
+    # Ensure the dimensions match correctly.
+    total_transpiration_per_layer[:, :, 1:transp_layers] = sum(transpiration, dims=4)[:, :, 1:transp_layers, 1]
+
+    total_soil_evaporation_per_layer = CUDA.zeros(Float32, size(soil_moisture_old))
+    # Soil evaporation is typically only from the top layer.
+    total_soil_evaporation_per_layer[:, :, 1] = sum(soil_evaporation, dims=4)[:, :, 1, 1]
+
+    # Initialize new soil moisture
     soil_moisture_new = copy(soil_moisture_old)
 
-    # --- FIX: Use a conditional structure and add bounds checks for robustness ---
     if num_layers == 1
-        # --- Update for a single-layer model ---
-        # Inflow is surface inflow. Outflow is evaporation, transpiration, and baseflow.
-        outflow_l1 = total_soil_evaporation_per_layer[:, :, 1] .+ total_transpiration_per_layer[:, :, 1] .+ baseflow
-        soil_moisture_new[:, :, 1] .+= surface_inflow .- outflow_l1
-    
-    else # num_layers >= 2
-        # --- Update for a multi-layer model (2+ layers) ---
-        # Update layer 1
-        outflow_l1 = total_soil_evaporation_per_layer[:, :, 1] .+ total_transpiration_per_layer[:, :, 1] .+ Q12[:, :, 1]
-        soil_moisture_new[:, :, 1] .+= surface_inflow .- outflow_l1
+        # For a single layer, inflow is surface_inflow
+        # Outflows are soil evaporation, transpiration, and baseflow
+        soil_moisture_new[:, :, 1] .+= surface_inflow .- (
+            total_soil_evaporation_per_layer[:, :, 1] .+
+            total_transpiration_per_layer[:, :, 1] .+
+            baseflow
+        )
 
-        # Update intermediate layers (this loop only runs if num_layers >= 3)
+    else # num_layers >= 2
+        # Update layer 1 (Top Layer)
+        # Inflow: surface_inflow
+        # Outflows: soil_evaporation, transpiration, and drainage to layer 2 (Q12[:, :, 1])
+        soil_moisture_new[:, :, 1] .+= surface_inflow .- (
+            total_soil_evaporation_per_layer[:, :, 1] .+
+            total_transpiration_per_layer[:, :, 1] .+
+            Q12[:, :, 1]
+        )
+
+        # Update intermediate layers (loop only runs if num_layers >= 3)
+        # For each intermediate layer 'l':
+        # Inflow: drainage from layer (l-1) (Q12[:, :, l-1])
+        # Outflows: transpiration from layer 'l', and drainage to layer (l+1) (Q12[:, :, l])
         for l in 2:(num_layers - 1)
-            inflow_l = Q12[:, :, l-1]
-            drainage_l = Q12[:, :, l]
-            # Defensively check if transpiration data exists for this layer before subtracting
-            if l <= size(total_transpiration_per_layer, 3)
-                soil_moisture_new[:, :, l] .+= inflow_l .- total_transpiration_per_layer[:, :, l] .- drainage_l
-            else
-                soil_moisture_new[:, :, l] .+= inflow_l .- drainage_l
-            end
+            soil_moisture_new[:, :, l] .+= Q12[:, :, l-1] .- (
+                total_transpiration_per_layer[:, :, l] .+
+                Q12[:, :, l]
+            )
         end
 
         # Update bottom layer
-        inflow_bottom = Q12[:, :, num_layers - 1]
-        # Defensively check if transpiration data exists for the bottom layer before subtracting
-        if num_layers <= size(total_transpiration_per_layer, 3)
-            soil_moisture_new[:, :, num_layers] .+= inflow_bottom .- total_transpiration_per_layer[:, :, num_layers] .- baseflow
-        else
-            soil_moisture_new[:, :, num_layers] .+= inflow_bottom .- baseflow
-        end
+        # Inflow: drainage from layer (num_layers - 1) (Q12[:, :, num_layers - 1])
+        # Outflows: transpiration from bottom layer, and baseflow
+        soil_moisture_new[:, :, num_layers] .+= Q12[:, :, num_layers - 1] .- (
+            total_transpiration_per_layer[:, :, num_layers] .-
+            baseflow
+        )
+
+
     end
-    
-    # --- Final checks ---
-    # Cap moisture at max and prevent it from falling below residual.
-    soil_moisture_new = clamp.(soil_moisture_new, residual_moisture, soil_moisture_max)
-    
+
+
+#    soil_moisture_new = clamp.(soil_moisture_new, 0.0, soil_moisture_max)
+    soil_moisture_new = min.(soil_moisture_new, soil_moisture_max)
+    soil_moisture_new = max.(residual_moisture, soil_moisture_new)
+
+
     return soil_moisture_new, baseflow, Q12
 end

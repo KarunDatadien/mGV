@@ -1,34 +1,30 @@
 function calculate_surface_runoff(prec_gpu, throughfall, soil_moisture_old, soil_moisture_max, b_i, cv_gpu)
-    # Sum the soil moisture and maximum soil moisture across the top two layers (layer 1)
-    topsoil_moisture = sum(soil_moisture_old[:, :, 1:2], dims=3)
-    topsoil_moisture_max = sum(soil_moisture_max[:, :, 1:2], dims=3)
+    # Sum top two layers (upper zone in VIC/Liang 1994)
+    topsoil_moisture = sum(soil_moisture_old[:, :, 1:2], dims=3)[:,:,1]  # Make 2D
+    topsoil_moisture_max = sum(soil_moisture_max[:, :, 1:2], dims=3)[:,:,1]
 
-    # Compute the saturated area fraction (A_sat) as in the evaporation code
+    # Saturated area fraction (Eq. preceding 17 in Liang 1994)
     A_sat = 1.0 .- (1.0 .- topsoil_moisture ./ topsoil_moisture_max) .^ b_i
 
-    # Compute i_m (maximum infiltration capacity) using Eq. 17 rewritten
+    # Max infiltration capacity (rewritten Eq. 17)
     i_m = (1.0 .+ b_i) .* topsoil_moisture_max
 
-    # Compute i_0 (initial infiltration capacity) using Eq. 13
+    # Initial infiltration capacity (Eq. 13)
     i_0 = i_m .* (1.0 .- (1.0 .- A_sat) .^ (1.0 ./ b_i))
 
-    # Compute runoff for vegetated layers (n = 1 to nveg) using throughfall
-    total_water_input_veg = i_0 .+ sum_with_nan_handling(throughfall[:, :, :, 1:end-1], 4)
-    runoff_veg = ifelse.(total_water_input_veg  .>= i_m ,
-                         # Eq. 18a: Saturated case
-                         throughfall .- topsoil_moisture_max .+ topsoil_moisture,
-                         # Eq. 18b: Unsaturated case
-                         throughfall .- topsoil_moisture_max .+ topsoil_moisture .+
-                         topsoil_moisture_max .* (1.0 .- total_water_input_veg ./ i_m) .^ (1.0 .+ b_i))
+    # Total water input to soil (aggregated throughfall across all tiles)
+    total_water_input = sum_with_nan_handling(throughfall, 4)  # mm over grid
 
-    runoff = runoff_veg
-    
-    # Ensure runoff is non-negative
+    # Surface runoff (Eq. 18a/b in Liang 1994)
+    total_water_input_veg = total_water_input .+ i_0  # Note: no separate veg here, as shared soil
+    runoff = ifelse.(total_water_input_veg .>= i_m,
+                     total_water_input .- (topsoil_moisture_max .- topsoil_moisture),
+                     total_water_input .- topsoil_moisture_max .+ topsoil_moisture_max .* (1.0 .- total_water_input_veg ./ i_m) .^ (1.0 .+ b_i))
+
+    # Ensure non-negative
     runoff = max.(runoff, 0.0)
 
-    runoff = sum_with_nan_handling(runoff, 4)
-
-    return runoff
+    return runoff  # Single 2D array for grid-total surface runoff
 end
 
 function calculate_subsurface_runoff(soil_moisture_old, soil_moisture_max, Ds_gpu, Dsmax_gpu, Ws_gpu)
