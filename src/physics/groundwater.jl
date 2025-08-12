@@ -173,96 +173,134 @@ Returns:
 """
 
 function solve_runoff_and_drainage(
-    surface_inflow,      # Water reaching the soil surface (2D array)
-    soil_evaporation,    # Evaporation from each layer, per veg type (4D array)
-    transpiration,       # Transpiration from each layer, per veg type (4D array)
-    soil_moisture_old,   # Moisture from previous step (3D array)
-    soil_moisture_max,   # Max moisture (porosity) (3D array)
-    ksat_gpu,            # Saturated hydraulic conductivity (3D array)
-    residual_moisture,   # Residual moisture (3D array)
-    expt_gpu,            # Brooks-Corey exponent (3D array)
-    Dsmax_gpu, Ds_gpu, Ws_gpu, c_expt_gpu # These are 2D arrays
+    surface_inflow,      # (ny,nx)  [mm]
+    soil_evaporation,    # (ny,nx,nlayer,nveg)  [mm]
+    transpiration,       # (ny,nx,nlayer,nveg)  [mm]
+    soil_moisture_old,   # (ny,nx,nlayer)       [mm]
+    soil_moisture_max,   # (ny,nx,nlayer)       [mm]
+    ksat_gpu,            # (ny,nx,nlayer)
+    residual_moisture,   # (ny,nx,nlayer)
+    expt_gpu,            # (ny,nx,nlayer)
+    Dsmax_gpu, Ds_gpu, Ws_gpu, c_expt_gpu       # (ny,nx)
 )
-    # Convert all inputs to Float32 for GPU compatibility
-    surface_inflow_f32 = Float32.(surface_inflow)
-    soil_evaporation_f32 = Float32.(soil_evaporation)
-    transpiration_f32 = Float32.(transpiration)
-    soil_moisture_old_f32 = Float32.(soil_moisture_old)
-    soil_moisture_max_f32 = Float32.(soil_moisture_max)
-    ksat_gpu_f32 = Float32.(ksat_gpu)
-    residual_moisture_f32 = Float32.(residual_moisture)
-    expt_gpu_f32 = Float32.(expt_gpu)
-    Dsmax_gpu_f32 = Float32.(Dsmax_gpu)
-    Ds_gpu_f32 = Float32.(Ds_gpu)
-    Ws_gpu_f32 = Float32.(Ws_gpu)
-    c_expt_gpu_f32 = Float32.(c_expt_gpu)
+    # ---- unify dtype on GPU ----
+    T  = eltype(soil_moisture_old)
+    Z  = T(0); O = T(1); EPS = T(1e-9)
 
-    num_layers = size(soil_moisture_old_f32, 3)
+    W_old  = T.(soil_moisture_old)
+    Wmax   = T.(soil_moisture_max)
+    Wres   = T.(residual_moisture)
+    Ksat   = T.(ksat_gpu)
+    exptT  = T.(expt_gpu)
+    DsmaxT = T.(Dsmax_gpu); DsT = T.(Ds_gpu)
+    WsT    = T.(Ws_gpu);    cexpT = T.(c_expt_gpu)
 
-    # 1. Calculate drainage flux between all upper layers (1 to N-1)
-    Q12 = CUDA.zeros(Float32, size(surface_inflow_f32, 1), size(surface_inflow_f32, 2), num_layers - 1)
-    for l in 1:(num_layers - 1)
-        Q12[:, :, l] = calculate_interlayer_drainage(
-            ksat_gpu_f32[:, :, l], soil_moisture_old_f32[:, :, l],
-            soil_moisture_max_f32[:, :, l], residual_moisture_f32[:, :, l], expt_gpu_f32[:, :, l]
-        )
+    inflow = T.(surface_inflow)                     # (ny,nx)
+    L      = size(W_old, 3)
+
+    # aggregate E and T per layer (sum over veg)
+    EvL = CUDA.zeros(T, size(W_old))                # only layer 1 is used
+    TrL = CUDA.zeros(T, size(W_old))
+    nTL = min(L, size(transpiration,3))
+    TrL[:, :, 1:nTL] .= sum(T.(transpiration), dims=4)[:, :, 1:nTL, 1]
+    EvL[:, :, 1]     .= sum(T.(soil_evaporation), dims=4)[:, :, 1, 1]
+
+    # working state
+    W = copy(W_old)
+    Q12 = CUDA.zeros(T, size(W,1), size(W,2), max(L-1,0))
+
+    # -------- LAYER 1 --------
+    # add infiltration
+    W[:, :, 1] .+= inflow
+
+    # evap + transpiration (cap by available above residual)
+    avail1 = max.(W[:, :, 1] .- Wres[:, :, 1], Z)
+    loss1_pot = EvL[:, :, 1] .+ TrL[:, :, 1]
+    scale1 = min.(O, avail1 ./ max.(loss1_pot, EPS))
+    Ev1 = EvL[:, :, 1] .* scale1
+    Tr1 = TrL[:, :, 1] .* scale1
+    W[:, :, 1] .-= (Ev1 .+ Tr1)
+
+    # gravitational drainage from updated state
+    if L >= 2
+        q12_1 = calculate_interlayer_drainage(
+                    Ksat[:, :, 1], W[:, :, 1], Wmax[:, :, 1], Wres[:, :, 1], exptT[:, :, 1]
+                )
+        # cap by available above residual
+        avail1 = max.(W[:, :, 1] .- Wres[:, :, 1], Z)
+        q12_1 = min.(q12_1, avail1)
+        W[:, :, 1] .-= q12_1
+
+        # spill any excess above Wmax to the next layer this step
+        spill1 = max.(W[:, :, 1] .- Wmax[:, :, 1], Z)
+        W[:, :, 1] .-= spill1
+        q12_1 .+= spill1
+        Q12[:, :, 1] .= q12_1
     end
 
-    # 2. Calculate baseflow exiting the bottom layer (N)
-    baseflow = calculate_baseflow(
-        soil_moisture_old_f32[:, :, num_layers], residual_moisture_f32[:, :, num_layers],
-        soil_moisture_max_f32[:, :, num_layers], Dsmax_gpu_f32, Ds_gpu_f32, Ws_gpu_f32, c_expt_gpu_f32
-    )
+    # -------- INTERIOR LAYERS (2..L-1) --------
+    for l in 2:max(L-1,1)
+        # add inflow from the layer above
+        in_l = (l == 2 ? Q12[:, :, 1] : Q12[:, :, l-1])
+        W[:, :, l] .+= in_l
 
-    # Aggregate fluxes across all vegetation types, padding for layers
-    transp_layers = size(transpiration_f32, 3)
-    total_transpiration_per_layer = CUDA.zeros(Float32, size(soil_moisture_old_f32))
-    total_transpiration_per_layer[:, :, 1:transp_layers] = sum(transpiration_f32, dims=4)[:, :, 1:transp_layers, 1]
+        # transpiration (no soil evap here)
+        avail = max.(W[:, :, l] .- Wres[:, :, l], Z)
+        loss_pot = TrL[:, :, l]
+        scale = min.(O, avail ./ max.(loss_pot, EPS))
+        Trl = TrL[:, :, l] .* scale
+        W[:, :, l] .-= Trl
 
-    total_soil_evaporation_per_layer = CUDA.zeros(Float32, size(soil_moisture_old_f32))
-    total_soil_evaporation_per_layer[:, :, 1] = sum(soil_evaporation_f32, dims=4)[:, :, 1, 1]
+        # drainage to next layer using UPDATED W
+        q12_l = calculate_interlayer_drainage(
+                    Ksat[:, :, l], W[:, :, l], Wmax[:, :, l], Wres[:, :, l], exptT[:, :, l]
+                )
+        avail = max.(W[:, :, l] .- Wres[:, :, l], Z)
+        q12_l = min.(q12_l, avail)
+        W[:, :, l] .-= q12_l
 
-    # Initialize new soil moisture
-    soil_moisture_new = copy(soil_moisture_old_f32)
+        # spill over-capacity
+        spill = max.(W[:, :, l] .- Wmax[:, :, l], Z)
+        W[:, :, l] .-= spill
+        q12_l .+= spill
 
-    if num_layers == 1
-        soil_moisture_new[:, :, 1] .+= surface_inflow_f32 .- (
-            total_soil_evaporation_per_layer[:, :, 1] .+
-            total_transpiration_per_layer[:, :, 1] .+
-            baseflow
-        )
+        Q12[:, :, l] .= q12_l
+    end
+
+    # -------- BOTTOM LAYER --------
+    if L == 1
+        Wpre = W[:, :, 1]
+        bf_pot = calculate_baseflow(Wpre, Wres[:, :, 1], Wmax[:, :, 1], DsmaxT, DsT, WsT, cexpT)
+        avail = max.(Wpre .- Wres[:, :, 1], Z)
+        bf    = min.(bf_pot, avail)
+        W[:, :, 1] .= Wpre .- bf
+        baseflow = bf
     else
-        soil_moisture_new[:, :, 1] .+= surface_inflow_f32 .- (
-            total_soil_evaporation_per_layer[:, :, 1] .+
-            total_transpiration_per_layer[:, :, 1] .+
-            Q12[:, :, 1]
-        )
+        inN = Q12[:, :, L-1]
+        W[:, :, L] .+= inN
 
-        for l in 2:(num_layers - 1)
-            soil_moisture_new[:, :, l] .+= Q12[:, :, l-1] .- (
-                total_transpiration_per_layer[:, :, l] .+
-                Q12[:, :, l]
-            )
-        end
+        bf_pot = calculate_baseflow(W[:, :, L], Wres[:, :, L], Wmax[:, :, L],
+                                    DsmaxT, DsT, WsT, cexpT)
+        avail  = max.(W[:, :, L] .- Wres[:, :, L], Z)
+        bf     = min.(bf_pot, avail)
+        W[:, :, L] .-= bf
 
-        soil_moisture_new[:, :, num_layers] .+= Q12[:, :, num_layers - 1] .- (
-            total_transpiration_per_layer[:, :, num_layers] .+
-            baseflow
-        )
+        # deep percolation if still above capacity
+        deep = max.(W[:, :, L] .- Wmax[:, :, L], Z)
+        W[:, :, L] .-= deep
+        baseflow = bf .+ deep
     end
 
-    soil_moisture_new = min.(soil_moisture_new, soil_moisture_max_f32)
-    soil_moisture_new = max.(residual_moisture_f32, soil_moisture_new)
+    # safety clamp (no-op if logic above is right)
+    W = min.(max.(W, Wres), Wmax)
 
-    # Diagnostic: Check water balance, replacing NaNs with 0
-    total_inflow = ifelse.(isnan.(surface_inflow_f32), 0.0f0, surface_inflow_f32)
-    total_outflow = ifelse.(isnan.(sum(total_soil_evaporation_per_layer, dims=3)), 0.0f0, sum(total_soil_evaporation_per_layer, dims=3)) .+
-                    ifelse.(isnan.(sum(total_transpiration_per_layer, dims=3)), 0.0f0, sum(total_transpiration_per_layer, dims=3)) .+
-                    ifelse.(isnan.(sum(Q12, dims=3)), 0.0f0, sum(Q12, dims=3)) .+
-                    ifelse.(isnan.(baseflow), 0.0f0, baseflow)
-    water_balance_error = total_inflow .- total_outflow .- (soil_moisture_new .- soil_moisture_old_f32)
-    water_balance_error = ifelse.(isnan.(water_balance_error), 0.0f0, water_balance_error)
-    println("Max water balance error: ", maximum(abs.(water_balance_error)))
+    # mass-balance diag (internal Q12 cancels)
+    dS = sum(W .- W_old, dims=3)[:, :, 1]
+    total_in  = inflow
+    total_out = Ev1 .+ sum(TrL, dims=3)[:, :, 1] .+ baseflow
+    wb_err = total_in .- total_out .- dS
+    println("Max |water balance error| = ", maximum(abs.(wb_err)))
 
-    return soil_moisture_new, baseflow, Q12
+    return W, baseflow, Q12
 end
+
