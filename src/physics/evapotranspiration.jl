@@ -1,40 +1,55 @@
-function compute_aerodynamic_resistance(z2, d0_gpu, z0_gpu, z0soil_gpu, tsurf, tair_gpu, wind_gpu, cv_gpu)    
-    roughness = CUDA.zeros(float_type, size(cv_gpu))
+function compute_aerodynamic_resistance(z2, d0_gpu, z0_gpu, z0soil_gpu, tsurf, tair_gpu, wind_gpu, cv_gpu)
+    # Use one element type everywhere
+    T   = eltype(cv_gpu)
+    Kt  = T(K); gt = T(g); Tf = T(t_freeze); Ric = T(Ri_cr)
 
-    roughness[:, :, :, 1:end-1] = z0_gpu[:, :, :, 1:end-1]
-    roughness[:, :, :, end:end] = z0soil_gpu
+    # numeric safeties
+    z_floor    = T(1e-3)         # min roughness [m]
+    d_floor    = T(1e-2)         # min (z2 - d0) [m]
+    wind_floor = T(0.1)          # min wind [m/s]
+    L2_min     = T(log(1.01)^2)  # min (ln(arg))^2
+    ra_min     = T(1.0)          # clamp bounds [s/m]
+    ra_max     = T(1e5)
 
-    # Compute a²[n] and c
-    a_squared = (K^2) ./ (log.((z2 .- d0_gpu) ./ roughness).^2)
-    c_coefficient = 49.82 .* a_squared .* sqrt.((z2 .- d0_gpu) ./ roughness)
-    
-    # Compute Richardson number
-    # NOTE TODO:
-    # - Ri_B and Fw are currently allocated as Float64.
-    # - It would be better to preallocate them at the beginning of the simulation as float_type
-    #   (assuming all other arrays are also float_type).
-    # - Then use `Fw .=` and `Ri_B .=` to overwrite their contents.
-    Ri_B = ifelse.(
-        tsurf .!= tair_gpu,
-        g .* (tair_gpu .- tsurf) .* (z2 .- d0_gpu) ./ 
-        (((tair_gpu .+ t_freeze) .+ (tsurf .+ t_freeze)) ./ 2 .* wind_gpu.^2),
-        0.0
-    )
+    # roughness per tile (veg tiles from z0, last tile from soil z0)
+    roughness = CUDA.zeros(T, size(cv_gpu))
+    roughness[:, :, :, 1:end-1] .= max.(T.(z0_gpu[:, :, :, 1:end-1]), z_floor)
+    roughness[:, :, :, end:end] .= max.(T.(z0soil_gpu),               z_floor)
 
-    Ri_B = clamp.(Ri_B, -0.5, Ri_cr)
- 
-    # Compute friction factor
-    Fw = ifelse.(Ri_B .< 0,
-         1 .- (9.4 .* Ri_B) ./ (1 .+ c_coefficient .* abs.(Ri_B).^0.5),
-         1 ./ (1 .+ 4.7 .* Ri_B).^2
-    ) 
+    # effective height above displacement
+    z2T   = T(z2)
+    d_eff = max.(z2T .- T.(d0_gpu), d_floor)                      # 4D
 
-    # Compute transfer coefficient and aerodynamic resistance
-    transfer_coefficient = 1.351 .* a_squared .* Fw
-    aerodynamic_resistance = 1 ./ (transfer_coefficient .* wind_gpu)
+    # log-law pieces
+    ratio = clamp.(d_eff ./ roughness, T(1e-6), T(1e6))           # > 0
+    L     = log.(ratio)
+    L2    = max.(L .* L, L2_min)
+    a_sq  = (Kt^T(2)) ./ L2
+    ccoef = T(49.82) .* a_sq .* sqrt.(ratio)
 
-    return aerodynamic_resistance
+    # stability: bulk Richardson number
+    Tmean = max.(((T.(tair_gpu) .+ Tf) .+ (T.(tsurf) .+ Tf)) .* T(0.5), T(100.0))  # 2D
+    w     = max.(T.(wind_gpu), wind_floor)                                         # 2D
+    Ri_B  = gt .* (T.(tair_gpu) .- T.(tsurf)) .* d_eff ./ (Tmean .* (w .* w))      # 4D via broadcast
+    Ri_B  = clamp.(Ri_B, T(-0.5), Ric)
+
+    # friction factor Fw
+    Fw_neg = T(1) .- (T(9.4) .* Ri_B) ./ (T(1) .+ ccoef .* sqrt.(abs.(Ri_B)))
+    Fw_pos = T(1) ./ (T(1) .+ T(4.7) .* Ri_B).^T(2)
+    Fw     = ifelse.(Ri_B .< T(0), Fw_neg, Fw_pos)
+    Fw     = clamp.(Fw, T(1e-3), T(10.0))
+
+    # transfer coeff and aerodynamic resistance
+    C_H = T(1.351) .* a_sq .* Fw
+    C_H = max.(C_H, T(1e-6))
+    ra  = T(1.0) ./ (C_H .* w)                                     # broadcast 2D w over 4D C_H
+    ra  = clamp.(ra, ra_min, ra_max)
+
+    return ra
 end
+
+
+
 
 function compute_partial_canopy_resistance(rmin_gpu, LAI_gpu)
     # Canopy resistance based on soil moisture (Eq. 6), without gsm multiplication; done in evapotranspiration calculation step   
@@ -45,74 +60,122 @@ function calculate_net_radiation(swdown_gpu, lwdown_gpu, albedo_gpu, tsurf)
     return (1.0 .- albedo_gpu) .* swdown_gpu .+ emissivity .* (lwdown_gpu .- sigma .* (tsurf .+ 273.15).^4)
 end
 
-function calculate_potential_evaporation(tair_gpu, vp_gpu, elev_gpu, net_radiation, aerodynamic_resistance, rarc_gpu, rmin_gpu, LAI_gpu)
-    # Compute intermediate variables
-    vpd           = max.(calculate_vpd(tair_gpu, vp_gpu), 0.0)  # [Pa], ensure non-negative
-    slope         = calculate_svp_slope(tair_gpu) # [Pa/°C]
-    latent_heat   = calculate_latent_heat(tair_gpu) # [J/kg]
-    scale_height  = calculate_scale_height(tair_gpu, elev_gpu) # [m] 
-    surface_pressure = p_std .* exp.(-elev_gpu ./ scale_height) # [Pa]
-    psychrometric_constant = 1628.6 .* surface_pressure ./ latent_heat # [Pa/K]
-    air_density = 0.003486 .* surface_pressure ./ (273.15 .+ tair_gpu) # [kg/m^3]
+function calculate_potential_evaporation(
+    tair_gpu, vp_gpu, elev_gpu,
+    net_radiation, aerodynamic_resistance, rarc_gpu, rmin_gpu, LAI_gpu
+)
+    # Element type hygiene
+    T = eltype(aerodynamic_resistance)
 
-    # For vegetation tiles (1:end-1): Unstressed potential transpiration (PM with r_c = rmin / LAI)
-    rc_veg = rmin_gpu[:, :, :, 1:end-1] ./ LAI_gpu[:, :, :, 1:end-1]
-    numerator_veg = slope .* (net_radiation[:, :, :, 1:end-1] .* day_sec) .+ (air_density .* c_p_air .* vpd .* day_sec ./ 50.0)
-    denominator_veg = latent_heat .* (slope .+ psychrometric_constant .* (1 .+ (rc_veg .+ rarc_gpu[:, :, :, 1:end-1]) ./ 50.0))
-    potential_evaporation_veg = (numerator_veg ./ denominator_veg)  # kg/m²/day = [mm/day]
+    # --- Common met terms (2-D, cast to T) ---
+    vpd         = max.(T.(calculate_vpd(tair_gpu, vp_gpu)), T(0))
+    slope       = T.(calculate_svp_slope(tair_gpu))
+    latent_heat = T.(calculate_latent_heat(tair_gpu .+ T(273.15)))
+    scale_h     = T.(calculate_scale_height(tair_gpu, elev_gpu))
+    p_sfc       = T(p_std) .* exp.(-T.(elev_gpu) ./ scale_h)
+    gamma_      = T(1628.6) .* p_sfc ./ latent_heat
+    air_dens    = T(0.003486) .* p_sfc ./ (T(273.15) .+ T.(tair_gpu))
 
-    # For bare soil: Potential soil evaporation (PM with r_c = 0)
-    SOIL_RARC = 100.0  # TODO: is this ok? taken from VIC
-    aerodynamic_resistance_soil = aerodynamic_resistance[:, :, :, end:end]  # Use bare soil slice
-    net_radiation_soil = net_radiation[:, :, :, end:end]  # Use bare soil slice for consistency
-    numerator_soil = slope .* (net_radiation_soil .* day_sec) .+ (air_density .* c_p_air .* vpd .* day_sec ./ aerodynamic_resistance_soil)
-    denominator_soil = latent_heat .* (slope .+ psychrometric_constant .* (1 .+ SOIL_RARC ./ aerodynamic_resistance_soil))
-    potential_evaporation_soil = (numerator_soil ./ denominator_soil)
+    # --- Tile counts & slices (use ra as reference) ---
+    N_all   = size(aerodynamic_resistance, 4)        # veg + bare
+    @assert N_all ≥ 1 "aerodynamic_resistance must have ≥1 tiles"
+    veg_dim = max(N_all - 1, 0)                      # vegetation tiles
+    if veg_dim == 0
+        # no vegetation tiles: just soil PET
+        Rn_soil = T.(net_radiation[:, :, :, end:end])
+        ra_soil = aerodynamic_resistance[:, :, :, end:end]
+        num_s   = slope .* (Rn_soil .* day_sec) .+ (air_dens .* c_p_air .* vpd .* day_sec ./ ra_soil)
+        den_s   = latent_heat .* (slope .+ gamma_ .* (1 .+ T(0.0) ./ ra_soil))  # SOIL_RARC=0
+        pe = max.(num_s ./ den_s, T(0))
+        return pe
+    end
 
-    # Combine
-    potential_evaporation = CUDA.zeros(float_type, size(net_radiation))
-    potential_evaporation[:, :, :, 1:end-1] = potential_evaporation_veg
-    potential_evaporation[:, :, :, end:end] = potential_evaporation_soil
+    # Views that GUARANTEE matching tile counts
+    @views begin
+        Rn_veg   = T.(net_radiation[:, :, :, 1:veg_dim])
+        rc_veg   = rmin_gpu[:, :, :, 1:veg_dim] ./ max.(LAI_gpu[:, :, :, 1:veg_dim], T(1e-6))
+        rarc_veg = rarc_gpu[:, :, :, 1:veg_dim]
+        ra_veg   = aerodynamic_resistance[:, :, :, 1:veg_dim]
 
-    # Ensure potential evaporation is non-negative
-    potential_evaporation = max.(potential_evaporation, 0.0)
+        Rn_soil  = T.(net_radiation[:, :, :, N_all:N_all])
+        ra_soil  = aerodynamic_resistance[:, :, :, N_all:N_all]
+    end
 
-    return potential_evaporation # [mm/day]
+    # --- Vegetation PET (Penman–Monteith with rc=rmin/LAI) ---
+    num_v = slope .* (Rn_veg .* day_sec) .+ (air_dens .* c_p_air .* vpd .* day_sec ./ ra_veg)
+    den_v = latent_heat .* (slope .+ gamma_ .* (1 .+ (rc_veg .+ rarc_veg) ./ ra_veg))
+    pe_veg = max.(num_v ./ den_v, T(0))
+
+    # --- Bare soil PET (PM with rc=0) ---
+    SOIL_RARC = T(0.0)
+    num_s = slope .* (Rn_soil .* day_sec) .+ (air_dens .* c_p_air .* vpd .* day_sec ./ ra_soil)
+    den_s = latent_heat .* (slope .+ gamma_ .* (1 .+ SOIL_RARC ./ ra_soil))
+    pe_soil = max.(num_s ./ den_s, T(0))
+
+    # --- Assemble full 4-D output with N_all tiles ---
+    pe = CUDA.zeros(T, size(net_radiation))
+    pe[:, :, :, 1:veg_dim] .= pe_veg
+    pe[:, :, :, N_all:N_all] .= pe_soil
+    return pe
 end
+
 
 function calculate_max_water_storage(LAI_gpu, cv_gpu, coverage_gpu)
     # Compute maximum water intercepted/stored in the canopy cover
-    result = K_L .* LAI_gpu .* cv_gpu .* coverage_gpu #TODO should we multiply by .* cv_gpu ?
+    result = K_L .* LAI_gpu #TODO should we multiply by .* cv_gpu ?
     return ifelse.(isnan.(result) .| (abs.(result) .> fillvalue_threshold), 0.0, result)
 end
 
-function calculate_canopy_evaporation(water_storage, max_water_storage, potential_evaporation, aerodynamic_resistance, rarc, prec_gpu, cv_gpu, rmin, LAI_gpu)
-
+function calculate_canopy_evaporation(
+    water_storage, max_water_storage, potential_evaporation,
+    aerodynamic_resistance, rarc, prec_gpu, cv_gpu, rmin, LAI_gpu,
+    tair_gpu, elev_gpu
+)
+    # Clean inputs (keep your existing style)
     potential_evaporation .= ifelse.(isnan.(potential_evaporation) .| (abs.(potential_evaporation) .> fillvalue_threshold), 0.0, potential_evaporation)
-    water_storage .= ifelse.(isnan.(water_storage) .| (abs.(water_storage) .> fillvalue_threshold), 0.0, water_storage)
-    max_water_storage .= ifelse.(isnan.(max_water_storage) .| (abs.(max_water_storage) .> fillvalue_threshold), 0.0, max_water_storage)
-    aerodynamic_resistance .= ifelse.(isnan.(aerodynamic_resistance) .| (abs.(aerodynamic_resistance) .> fillvalue_threshold), 0.0, aerodynamic_resistance)
-    rarc .= ifelse.(isnan.(rarc) .| (abs.(rarc) .> fillvalue_threshold), 0.0, rarc)
+    water_storage         .= ifelse.(isnan.(water_storage)         .| (abs.(water_storage)         .> fillvalue_threshold), 0.0, water_storage)
+    max_water_storage     .= ifelse.(isnan.(max_water_storage)     .| (abs.(max_water_storage)     .> fillvalue_threshold), 0.0, max_water_storage)
+    aerodynamic_resistance.= ifelse.(isnan.(aerodynamic_resistance).| (abs.(aerodynamic_resistance).> fillvalue_threshold), 1e6, aerodynamic_resistance)
+    rarc                  .= ifelse.(isnan.(rarc)                  .| (abs.(rarc)                  .> fillvalue_threshold), 0.0, rarc)
 
-    # Approximate wet E_p from unstressed potential
-    rc = rmin ./ LAI_gpu
-    e_p_wet = potential_evaporation .* (50.0 .+ rarc .+ rc) ./ (50.0 .+ rarc)
+    # -------- slope (Δ) and psychrometric constant (γ) --------
+    # keep Watson Hvap in Kelvin (matches your PET code)
+    slope = calculate_svp_slope(tair_gpu)                                       # Pa / °C
+    latent_heat = calculate_latent_heat(tair_gpu .+ 273.15)                     # J / kg
+    scale_height = calculate_scale_height(tair_gpu, elev_gpu)                   # m
+    surface_pressure = p_std .* exp.(-elev_gpu ./ scale_height)                 # Pa
+    psychrometric_constant = 1628.6 .* surface_pressure ./ latent_heat          # Pa / °C
 
-    # Compute potential canopy evaporation
-#    canopy_evaporation_star = (water_storage ./ max_water_storage).^(2 / 3) .* e_p_wet .* 
-#                              (50.0 ./ (50.0 .+ rarc))
+    # rc from rmin/LAI (guard tiny LAI)
+    T = eltype(potential_evaporation)
+    tiny    = T(1e-12)
+    tinyLAI = T(1e-6)
+    rc = rmin ./ max.(LAI_gpu, tinyLAI)
 
-    canopy_evaporation_star = (water_storage ./ max_water_storage).^(2 / 3) .* potential_evaporation .* 
-                              (50.0 ./ (50.0 .+ rarc))
-    # Ensure canopy evaporation fraction (f_n) is bounded between 0 and 1
-    f_n = min.(1.0, (water_storage .+ prec_gpu .* cv_gpu) ./ canopy_evaporation_star)
+    ra = aerodynamic_resistance
 
-    # Compute actual canopy evaporation
+    # Convert your veg PET (uses rc=rmin/LAI) --> wet-canopy PET (rc=0) via PM denominator ratio
+    denom_unstressed = slope .+ psychrometric_constant .* (1 .+ (rc .+ rarc) ./ ra)
+    denom_wet        = slope .+ psychrometric_constant .* (1 .+ rarc ./ ra)
+    e_p_wet = potential_evaporation .* (denom_unstressed ./ max.(denom_wet, tiny))  # mm/Δt
+
+    # Eq. (1): (W/Wmax)^(2/3) * Ep_wet * ra/(ra + rarc)
+    Wratio = clamp.(water_storage ./ max.(max_water_storage, tiny), 0.0, 1.0)
+    canopy_evaporation_star = (Wratio .^ (2/3)) .* e_p_wet .* (ra ./ max.(ra .+ rarc, tiny))
+
+    # Rain-limited cap (daily form)
+    f_n = clamp.((water_storage .+ prec_gpu .* cv_gpu) ./ max.(canopy_evaporation_star, tiny), 0.0, 1.0)
+
+    # Actual canopy evaporation
     canopy_evaporation = f_n .* canopy_evaporation_star
     canopy_evaporation = ifelse.(isnan.(canopy_evaporation) .| (abs.(canopy_evaporation) .> fillvalue_threshold), 0.0, canopy_evaporation)
 
+    # No canopy on bare-soil tile (last tile)
+    canopy_evaporation[:, :, :, end:end] .= 0.0
+
     return canopy_evaporation
 end
+
 
 #=
 This function has been updated to fix the GPU type-compatibility error.
@@ -132,65 +195,84 @@ function calculate_transpiration(
     soil_moisture_critical::CuArray, wilting_point::CuArray, root_gpu::CuArray,
     rmin_gpu::CuArray, LAI_gpu::CuArray, cv_gpu
 )
-    EPSILON = 1.0f-9
+    # -------- One dtype everywhere --------
+    T   = eltype(potential_evaporation)
+    F0  = T(0); F1 = T(1); EPS = T(1e-9)
 
-    # --- FIX: Enforce Float32 for type stability ---
-    # Convert all floating point inputs to Float32 at the start.
-    pot_evap_f32 = Float32.(potential_evaporation)
-    aero_res_f32 = Float32.(aerodynamic_resistance)
-    max_ws_f32 = Float32.(max_water_storage)
-    W_cr_f32 = Float32.(soil_moisture_critical)
-    W_wp_f32 = Float32.(wilting_point)
-    ws_f32 = Float32.(water_storage)
-    sm_old_f32 = Float32.(soil_moisture_old)
+    # Cast only the arrays used below that may be Float64
+    Wcr_T  = T.(soil_moisture_critical)      # (lat,lon,layer)
+    Wwp_T  = T.(wilting_point)               # (lat,lon,layer)
+    Wmax_T = T.(max_water_storage)           # (lat,lon,1,nveg)
+    W_T    = T.(water_storage)               # (lat,lon,1,nveg)
+    cv_T   = T.(cv_gpu)                      # (lat,lon,1,nveg)
 
+    # -------- soil-moisture stress per layer --------
+    W1   = @view soil_moisture_old[:, :, 1]
+    W2   = @view soil_moisture_old[:, :, 2]
+    Wcr1 = @view Wcr_T[:, :, 1]
+    Wcr2 = @view Wcr_T[:, :, 2]
+    Wwp1 = @view Wwp_T[:, :, 1]
+    Wwp2 = @view Wwp_T[:, :, 2]
 
-    # --- 1. Define Soil and Root Properties for Each Layer ---
-    W_1 = view(sm_old_f32, :, :, 1)
-    W_2 = view(sm_old_f32, :, :, 2)
-    
-    W_cr_1 = view(W_cr_f32, :, :, 1)
-    W_cr_2 = view(W_cr_f32, :, :, 2)
+    g1 = clamp.((W1 .- Wwp1) ./ (Wcr1 .- Wwp1 .+ EPS), F0, F1)
+    g2 = clamp.((W2 .- Wwp2) ./ (Wcr2 .- Wwp2 .+ EPS), F0, F1)
 
-    W_wp_1 = view(W_wp_f32, :, :, 1)
-    W_wp_2 = view(W_wp_f32, :, :, 2)
+    lat_dim, lon_dim = size(g1)
+    veg_dim = size(root_gpu, 4)   # vegetation tiles
+    nveg    = size(cv_T, 4)       # vegetation + bare
 
-    f_1 = sum(view(root_gpu, :, :, 1, :), dims=3)[:,:,1]
-    f_2 = sum(view(root_gpu, :, :, 2, :), dims=3)[:,:,1]
+    f1 = reshape(@view(root_gpu[:, :, 1, :]), lat_dim, lon_dim, 1, veg_dim)
+    f2 = reshape(@view(root_gpu[:, :, 2, :]), lat_dim, lon_dim, 1, veg_dim)
+    g1b = reshape(g1, lat_dim, lon_dim, 1, 1)
+    g2b = reshape(g2, lat_dim, lon_dim, 1, 1)
 
-    # --- 2. Calculate Individual Layer Stress Factors (g_sm) ---
-    g_sm_1 = (W_1 .- W_wp_1) ./ (W_cr_1 .- W_wp_1 .+ EPSILON)
-    g_sm_2 = (W_2 .- W_wp_2) ./ (W_cr_2 .- W_wp_2 .+ EPSILON)
-    
-    g_sm_1 = clamp.(g_sm_1, 0.0f0, 1.0f0)
-    g_sm_2 = clamp.(g_sm_2, 0.0f0, 1.0f0)
+    sumf      = sum(root_gpu, dims=3)                    # (lat,lon,1,veg_dim)
+    g_sw_veg  = clamp.((f1 .* g1b .+ f2 .* g2b) ./ (sumf .+ EPS), F0, F1)
 
-    # --- 3. Determine the Final Soil Moisture Stress (g_sw) ---
-    g_sw = (f_1 .* g_sm_1 .+ f_2 .* g_sm_2) ./ (f_1 .+ f_2 .+ EPSILON)
+    # -------- canopy wetness (per-canopy) --------
+    cv_safe = max.(cv_T, EPS)
+    W_can   = W_T ./ cv_safe                               # put W on canopy area basis
+    Wratio  = clamp.(W_can ./ max.(Wmax_T, EPS), F0, F1)
+    wetFrac = Wratio .^ (T(2)/T(3))
+    dryFrac = clamp.(F1 .- wetFrac, F0, F1)
+    dryFrac[:, :, :, end:end] .= F1                        # bare soil unaffected
 
-    g_sw = ifelse.((W_2 .>= W_cr_2) .& (f_2 .>= 0.5f0), 1.0f0, g_sw)
+    # -------- transpiration for vegetation tiles only --------
+    transpiration_veg =
+        cv_T[:, :, :, 1:veg_dim] .*                        # ensure T
+        dryFrac[:, :, :, 1:veg_dim] .*
+        potential_evaporation[:, :, :, 1:veg_dim] .*
+        g_sw_veg
 
-    g_sw = ifelse.((W_1 .>= W_cr_1) .& (f_1 .>= 0.5f0), 1.0f0, g_sw)
+    transpiration_veg = clamp.(transpiration_veg, F0, T(Inf))
 
-    g_sw = clamp.(ifelse.(isnan.(g_sw), 0.0f0, g_sw), 0.0f0, 1.0f0)
+    # split to layers (weights)
+    denom_veg = (f1 .* g1b .+ f2 .* g2b .+ EPS)
+    E_1_t_veg = transpiration_veg .* (f1 .* g1b) ./ denom_veg
+    E_2_t_veg = transpiration_veg .* (f2 .* g2b) ./ denom_veg
 
-    # --- 4. Calculate Total Transpiration ---
-    dryFrac = 1.0f0 .- (ws_f32 ./ (max_ws_f32 .+ EPSILON)) .^ (2.0f0/3.0f0)
-    dryFrac = clamp.(dryFrac, 0.0f0, 1.0f0)
-    
-    total_transpiration = dryFrac .* pot_evap_f32 .* g_sw
-    total_transpiration = clamp.(total_transpiration, 0.0f0, Inf32)
+    # GPU-safe NaN guards (branches match eltype T)
+    E_1_t_veg = ifelse.(isnan.(E_1_t_veg), F0, E_1_t_veg)
+    E_2_t_veg = ifelse.(isnan.(E_2_t_veg), F0, E_2_t_veg)
 
-    # --- 5. Distribute Transpiration to Each Layer ---
-    denom = (f_1 .* g_sm_1 .+ f_2 .* g_sm_2 .+ EPSILON)
-    E_1_t = total_transpiration .* (f_1 .* g_sm_1) ./ denom
-    E_2_t = total_transpiration .* (f_2 .* g_sm_2) ./ denom
+    # -------- pad bare-soil slice with zeros to (… , nveg) --------
+    transpiration_full = CUDA.zeros(T, size(cv_T))
+    E_1_t_full         = CUDA.zeros(T, size(cv_T))
+    E_2_t_full         = CUDA.zeros(T, size(cv_T))
 
-    E_1_t = clamp.(ifelse.(isnan.(E_1_t), 0.0f0, E_1_t), 0.0f0, total_transpiration)
-    E_2_t = clamp.(ifelse.(isnan.(E_2_t), 0.0f0, E_2_t), 0.0f0, total_transpiration)
+    transpiration_full[:, :, :, 1:veg_dim] .= transpiration_veg
+    E_1_t_full[:, :, :, 1:veg_dim]        .= E_1_t_veg
+    E_2_t_full[:, :, :, 1:veg_dim]        .= E_2_t_veg
 
-    return total_transpiration, E_1_t, E_2_t, g_sm_1, g_sm_2, g_sw
+    # diagnostic g_sw_total (2D)
+    f1t = sum(@view(root_gpu[:, :, 1, :]), dims=3)[:, :, 1]
+    f2t = sum(@view(root_gpu[:, :, 2, :]), dims=3)[:, :, 1]
+    g_sw_total = clamp.((f1t .* g1 .+ f2t .* g2) ./ (f1t .+ f2t .+ EPS), F0, F1)
+
+    return transpiration_full, E_1_t_full, E_2_t_full, g1, g2, g_sw_total
 end
+
+
 
 
 
@@ -200,75 +282,58 @@ end
 
 # You might need to import the Printf module to use @printf
 using Printf
-
 function calculate_soil_evaporation(soil_moisture, soil_moisture_max, potential_evaporation, b_i, cv_gpu)
-    # A small epsilon to prevent division by zero in a numerically stable way.
-    # Using a value appropriate for Float32.
-    EPSILON = 1.0f-9 
+    # Use the grid's shared top-layer moisture (NOT the bare-soil tile slice)
+    # Shapes:
+    #   soil_moisture, soil_moisture_max :: (ny, nx, nlayer)
+    #   potential_evaporation            :: (ny, nx, 1, nveg)
+    #   cv_gpu                           :: (ny, nx, 1, nveg)
 
-    # Sum the soil moisture and maximum soil moisture across the top layer(s)
-    topsoil_moisture = sum(soil_moisture[:, :, 1:1, end:end], dims=3)
-    topsoil_moisture_max = sum(soil_moisture_max[:, :, 1:1, end:end], dims=3)
+    T = eltype(potential_evaporation)
+    EPS = T(1e-9)
 
-    # ====================================================================
-    # DIAGNOSTIC CHECKS: Find and report the root causes of instability
-    # ====================================================================
-    
-    # Check 1: Detect potential for division by zero.
-    # We count how many cells have a max capacity of zero.
-    num_zero_max = CUDA.sum(topsoil_moisture_max .== 0.0f0)
-    if num_zero_max > 0
-        # Print a warning if this condition is met.
-        @printf("SOIL EVAP WARNING: Found %d cells where topsoil_moisture_max is zero. This will cause division by zero.\n", num_zero_max)
+    # 2D fields (ny, nx)
+    topsoil_moisture     = @view soil_moisture[:, :, 1]
+    topsoil_moisture_max = @view soil_moisture_max[:, :, 1]
+
+    # Guard rails
+    moisture_ratio = clamp.(topsoil_moisture ./ (topsoil_moisture_max .+ EPS), T(0), T(1))
+
+    # A_sat (Xinanjiang curve)
+    A_sat = T(1) .- (T(1) .- moisture_ratio) .^ b_i
+    A_sat = clamp.(A_sat, T(0), T(1))
+    x = T(1) .- A_sat
+
+    # Series S(b) from Liang 1994 (Eq. 15) — 2D
+    S_series = CUDA.ones(T, size(x))
+    @inbounds for n = 1:20
+        S_series .+= (b_i ./ (n .+ b_i)) .* (x .^ (n ./ b_i))
     end
 
-    # Check 2: Detect moisture ratios > 1. This is the most common cause of NaNs
-    # in power functions like the one used for A_sat. It happens when
-    # `topsoil_moisture` slightly exceeds `topsoil_moisture_max` due to floating point errors.
-    num_ratio_gt_one = CUDA.sum(topsoil_moisture .> topsoil_moisture_max)
-    if num_ratio_gt_one > 0
-        @printf("SOIL EVAP WARNING: Found %d cells where moisture > max_moisture. This leads to taking the power of a negative number.\n", num_ratio_gt_one)
-    end
+    # Infiltration ratio (Eq. 13) — 2D
+    infiltration_ratio = T(1) .- (T(1) .- A_sat) .^ (T(1) ./ b_i)
 
-    # ====================================================================
-    # NUMERICAL SAFEGUARDS: Apply fixes to prevent NaNs
-    # ====================================================================
+    # Broadcast 2D fields to the bare-soil PET slice (ny, nx, 1, 1)
+    A_sat4   = reshape(A_sat,   size(A_sat,1),   size(A_sat,2),   1, 1)
+    x4       = reshape(x,       size(x,1),       size(x,2),       1, 1)
+    S4       = reshape(S_series,size(S_series,1),size(S_series,2),1, 1)
+    infil4   = reshape(infiltration_ratio, size(infiltration_ratio,1), size(infiltration_ratio,2), 1, 1)
 
-    # Safeguard 1: Add epsilon to the denominator and clamp the ratio.
-    # This simultaneously prevents division-by-zero and ensures the base of the
-    # power function below is never negative.
-    moisture_ratio = topsoil_moisture ./ (topsoil_moisture_max .+ EPSILON)
-    safe_moisture_ratio = clamp.(moisture_ratio, 0.0f0, 1.0f0)
+    # Bare-soil potential evaporation slice
+    Ep_soil = potential_evaporation[:, :, :, end:end]  # (ny, nx, 1, 1)
 
-    # Compute the saturated area fraction using the sanitized ratio.
-    A_sat = 1.0f0 .- (1.0f0 .- safe_moisture_ratio) .^ b_i
-    # Clamp the result as an extra precaution.
-    A_sat = clamp.(A_sat, 0.0f0, 1.0f0)
+    # Unsaturated + saturated contributions (Eqs. 14–15)
+    Ev_unsat = Ep_soil .* infil4 .* x4 .* S4
+    Ev_sat   = Ep_soil .* A_sat4
 
-    # Compute the unsaturated area fraction
-    x = 1.0f0 .- A_sat
+    total_soil_evaporation = Ev_sat .+ Ev_unsat
 
-    # Initialize S_series with ones.
-    S_series = CUDA.ones(float_type, size(x))
+    # Scale by bare-soil fraction (apply cv only here)
+    scaled_soil_evaporation = total_soil_evaporation .* cv_gpu[:, :, :, end:end]
 
-    # Approximate the series expansion. This is now safe because `x` is guaranteed non-negative.
-    for n = 1:30
-        S_series .+= (b_i ./ (n .+ b_i)) .* x .^ (n ./ b_i)
-    end
-
-    # Safeguard 2: Calculate the infiltration ratio directly and safely.
-    # Since A_sat is clamped, this calculation is now safe from NaNs.
-    infiltration_ratio = 1.0f0 .- (1.0f0 .- A_sat) .^ (1.0f0 ./ b_i)
-
-    # Unsaturated evaporation contribution
-    Ev_unsat = potential_evaporation[:, :, :, end:end] .* infiltration_ratio .* x .* S_series
-
-    # Saturated evaporation contribution
-    Ev_sat = potential_evaporation[:, :, :, end:end] .* A_sat
-
-    # Total soil evaporation
-    return Ev_sat .+ Ev_unsat
+    return scaled_soil_evaporation
 end
+
 
 
 
@@ -276,7 +341,7 @@ function update_water_canopy_storage(water_storage, prec_gpu, cv_gpu, canopy_eva
 
     # Calculate new water storage: current storage + (precipitation - canopy evaporation)
 #    new_water_storage = water_storage .+ (prec_gpu .* cv_gpu .* coverage) .- canopy_evaporation
-    new_water_storage = water_storage .+ (prec_gpu .* cv_gpu .* coverage) .- canopy_evaporation
+    new_water_storage = water_storage .+ (prec_gpu .* cv_gpu) .- canopy_evaporation
 
     # Compute throughfall: excess water beyond max storage
     throughfall = max.(0, new_water_storage .- max_water_storage)
@@ -284,16 +349,16 @@ function update_water_canopy_storage(water_storage, prec_gpu, cv_gpu, canopy_eva
     # Update water storage: clamp between 0 and max_water_storage
     water_storage = max.(0.0, min.(new_water_storage, max_water_storage))
     
-    return (water_storage), throughfall # TODO: why does (water_storage ./ 2) give near perfect values?
+    return (water_storage), throughfall 
 end
 
 # Eq. (23): Total evapotranspiration
 function calculate_total_evapotranspiration(canopy_evaporation, transpiration, soil_evaporation, cv_gpu)
     # Sum canopy evaporation and transpiration for vegetated classes (n = 1:nveg-1)
-    vegetated_et = cv_gpu[:, :, :, 1:end-1] .* (canopy_evaporation[:, :, :, 1:end-1] .+ transpiration[:, :, :, 1:end-1])
+    vegetated_et = cv_gpu[:, :, :, 1:end-1] .* (canopy_evaporation[:, :, :, 1:end-1]) .+ transpiration[:, :, :, 1:end-1] # cv_gpu[:, :, :, 1:end-1] .* 
     
     # Add bare soil evaporation (n = nveg)
-    bare_soil_et = cv_gpu[:, :, :, end:end] .* soil_evaporation
+    bare_soil_et =  soil_evaporation # cv_gpu[:, :, :, end:end] .*
     
     # Total evapotranspiration (sum across cover classes)
     total_et = sum_with_nan_handling(vegetated_et, 4) .+ bare_soil_et
