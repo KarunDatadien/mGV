@@ -126,55 +126,72 @@ function calculate_max_water_storage(LAI_gpu, cv_gpu, coverage_gpu)
     return ifelse.(isnan.(result) .| (abs.(result) .> fillvalue_threshold), 0.0, result)
 end
 
+        using Statistics
+
+
 function calculate_canopy_evaporation(
     water_storage, max_water_storage, potential_evaporation,
     aerodynamic_resistance, rarc, prec_gpu, cv_gpu, rmin, LAI_gpu,
     tair_gpu, elev_gpu
 )
-    # Clean inputs (keep your existing style)
+    # ---- sanitize ----
     potential_evaporation .= ifelse.(isnan.(potential_evaporation) .| (abs.(potential_evaporation) .> fillvalue_threshold), 0.0, potential_evaporation)
     water_storage         .= ifelse.(isnan.(water_storage)         .| (abs.(water_storage)         .> fillvalue_threshold), 0.0, water_storage)
     max_water_storage     .= ifelse.(isnan.(max_water_storage)     .| (abs.(max_water_storage)     .> fillvalue_threshold), 0.0, max_water_storage)
     aerodynamic_resistance.= ifelse.(isnan.(aerodynamic_resistance).| (abs.(aerodynamic_resistance).> fillvalue_threshold), 1e6, aerodynamic_resistance)
     rarc                  .= ifelse.(isnan.(rarc)                  .| (abs.(rarc)                  .> fillvalue_threshold), 0.0, rarc)
 
-    # -------- slope (Δ) and psychrometric constant (γ) --------
-    # keep Watson Hvap in Kelvin (matches your PET code)
-    slope = calculate_svp_slope(tair_gpu)                                       # Pa / °C
-    latent_heat = calculate_latent_heat(tair_gpu .+ 273.15)                     # J / kg
-    scale_height = calculate_scale_height(tair_gpu, elev_gpu)                   # m
-    surface_pressure = p_std .* exp.(-elev_gpu ./ scale_height)                 # Pa
-    psychrometric_constant = 1628.6 .* surface_pressure ./ latent_heat          # Pa / °C
+    # ---- Δ and γ (same as your PET code) ----
+    slope            = calculate_svp_slope(tair_gpu)                 # Pa / °C
+    latent_heat      = calculate_latent_heat(tair_gpu .+ 273.15)     # J / kg
+    scale_height     = calculate_scale_height(tair_gpu, elev_gpu)    # m
+    surface_pressure = p_std .* exp.(-elev_gpu ./ scale_height)      # Pa
+    gamma_           = 1628.6 .* surface_pressure ./ latent_heat     # Pa / °C
 
-    # rc from rmin/LAI (guard tiny LAI)
-    T = eltype(potential_evaporation)
+    # ---- resistances ----
+    T       = eltype(potential_evaporation)
     tiny    = T(1e-12)
-    tinyLAI = T(1e-6)
-    rc = rmin ./ max.(LAI_gpu, tinyLAI)
+    rc      = rmin ./ max.(LAI_gpu, T(1e-6))                         # r_c = rmin / LAI
+    ra      = aerodynamic_resistance
 
-    ra = aerodynamic_resistance
+    # OPTIONAL: temporary floor to test if rα is too small (set to nothing to disable)
+    # e.g., RALPHA_MIN = T(80.0)   # try 50–150 s m^-1 if diagnostics show ra_ratio ≈ 1
+    RALPHA_MIN = nothing
+    ralpha = (RALPHA_MIN === nothing) ? rarc : max.(rarc, RALPHA_MIN)
 
-    # Convert your veg PET (uses rc=rmin/LAI) --> wet-canopy PET (rc=0) via PM denominator ratio
-    denom_unstressed = slope .+ psychrometric_constant .* (1 .+ (rc .+ rarc) ./ ra)
-    denom_wet        = slope .+ psychrometric_constant .* (1 .+ rarc ./ ra)
-    e_p_wet = potential_evaporation .* (denom_unstressed ./ max.(denom_wet, tiny))  # mm/Δt
+    # ---- convert your veg PET (with rc) -> wet-canopy PET (rc = 0) via PM denominator ratio ----
+    den_rc  = slope .+ gamma_ .* (1 .+ (rc .+ ralpha) ./ ra)         # PET denominator you used
+    den_w   = slope .+ gamma_ .* (1 .+ ralpha ./ ra)                 # rc = 0, keep rα
+    E_p_wet = potential_evaporation .* (den_rc ./ max.(den_w, tiny)) # mm / Δt
 
-    # Eq. (1): (W/Wmax)^(2/3) * Ep_wet * ra/(ra + rarc)
+    # ---- VIC Eq. (1): (W/Wm)^(2/3) * E_p_wet * ra/(ra + rα) ----
     Wratio = clamp.(water_storage ./ max.(max_water_storage, tiny), 0.0, 1.0)
-    canopy_evaporation_star = (Wratio .^ (2/3)) .* e_p_wet .* (ra ./ max.(ra .+ rarc, tiny))
+    ra_ratio = ra ./ max.(ra .+ ralpha, tiny)
+    canopy_evaporation_star = (Wratio .^ (2/3)) .* E_p_wet .* ra_ratio
 
-    # Rain-limited cap (daily form)
-    f_n = clamp.((water_storage .+ prec_gpu .* cv_gpu) ./ max.(canopy_evaporation_star, tiny), 0.0, 1.0)
+    # ---- Rain-limited fraction f_n (Eq. 10) — **no cv here** ----
+    f_n = clamp.((water_storage .+ prec_gpu) ./ max.(canopy_evaporation_star, tiny), 0.0, 1.0)
 
-    # Actual canopy evaporation
+    # ---- Actual canopy evaporation (per-canopy units) ----
     canopy_evaporation = f_n .* canopy_evaporation_star
     canopy_evaporation = ifelse.(isnan.(canopy_evaporation) .| (abs.(canopy_evaporation) .> fillvalue_threshold), 0.0, canopy_evaporation)
 
-    # No canopy on bare-soil tile (last tile)
+    # Bare-soil tile has no canopy
     canopy_evaporation[:, :, :, end:end] .= 0.0
 
-    return canopy_evaporation
+    # ---- lightweight diagnostics (sampled) ----
+    if rand() < 1.0
+        @info "canopy diag" med_ra=Statistics.median(Array(ra))
+        @info "canopy diag" med_ralpha=Statistics.median(Array(ralpha))
+        @info "canopy diag" med_ra_ratio=Statistics.median(Array(ra_ratio))
+        @info "canopy diag" med_W23=Statistics.median(Array((Wratio .^ (2/3))))
+        @info "canopy diag" med_Epwet=Statistics.median(Array(E_p_wet))
+    end
+
+    return canopy_evaporation, f_n
 end
+
+
 
 
 #=
@@ -193,20 +210,21 @@ function calculate_transpiration(
     potential_evaporation::CuArray, aerodynamic_resistance::CuArray, rarc_gpu::CuArray,
     water_storage::CuArray, max_water_storage::CuArray, soil_moisture_old::CuArray,
     soil_moisture_critical::CuArray, wilting_point::CuArray, root_gpu::CuArray,
-    rmin_gpu::CuArray, LAI_gpu::CuArray, cv_gpu
+    rmin_gpu::CuArray, LAI_gpu::CuArray, cv_gpu, f_n
 )
     # -------- One dtype everywhere --------
     T   = eltype(potential_evaporation)
     F0  = T(0); F1 = T(1); EPS = T(1e-9)
 
     # Cast only the arrays used below that may be Float64
-    Wcr_T  = T.(soil_moisture_critical)      # (lat,lon,layer)
-    Wwp_T  = T.(wilting_point)               # (lat,lon,layer)
-    Wmax_T = T.(max_water_storage)           # (lat,lon,1,nveg)
-    W_T    = T.(water_storage)               # (lat,lon,1,nveg)
-    cv_T   = T.(cv_gpu)                      # (lat,lon,1,nveg)
+    Wcr_T  = T.(soil_moisture_critical)      # (ny,nx,layer)
+    Wwp_T  = T.(wilting_point)               # (ny,nx,layer)
+    Wmax_T = T.(max_water_storage)           # (ny,nx,1,nveg)
+    W_T    = T.(water_storage)               # (ny,nx,1,nveg)
+    cv_T   = T.(cv_gpu)                      # (ny,nx,1,nveg)
+    PE_T   = T.(potential_evaporation)       # (ny,nx,1,nveg)
 
-    # -------- soil-moisture stress per layer --------
+    # -------- soil-moisture stress per layer (assume L=2) --------
     W1   = @view soil_moisture_old[:, :, 1]
     W2   = @view soil_moisture_old[:, :, 2]
     Wcr1 = @view Wcr_T[:, :, 1]
@@ -217,48 +235,48 @@ function calculate_transpiration(
     g1 = clamp.((W1 .- Wwp1) ./ (Wcr1 .- Wwp1 .+ EPS), F0, F1)
     g2 = clamp.((W2 .- Wwp2) ./ (Wcr2 .- Wwp2 .+ EPS), F0, F1)
 
-    lat_dim, lon_dim = size(g1)
-    veg_dim = size(root_gpu, 4)   # vegetation tiles
+    ny, nx = size(g1)
+    veg_dim = size(root_gpu, 4)   # vegetation tiles (exclude bare)
     nveg    = size(cv_T, 4)       # vegetation + bare
 
-    f1 = reshape(@view(root_gpu[:, :, 1, :]), lat_dim, lon_dim, 1, veg_dim)
-    f2 = reshape(@view(root_gpu[:, :, 2, :]), lat_dim, lon_dim, 1, veg_dim)
-    g1b = reshape(g1, lat_dim, lon_dim, 1, 1)
-    g2b = reshape(g2, lat_dim, lon_dim, 1, 1)
+    f1  = reshape(@view(root_gpu[:, :, 1, :]), ny, nx, 1, veg_dim)
+    f2  = reshape(@view(root_gpu[:, :, 2, :]), ny, nx, 1, veg_dim)
+    g1b = reshape(g1, ny, nx, 1, 1)
+    g2b = reshape(g2, ny, nx, 1, 1)
 
-    sumf      = sum(root_gpu, dims=3)                    # (lat,lon,1,veg_dim)
-    g_sw_veg  = clamp.((f1 .* g1b .+ f2 .* g2b) ./ (sumf .+ EPS), F0, F1)
+    sumf     = sum(root_gpu, dims=3)                          # (ny,nx,1,veg_dim)
+    g_sw_veg = clamp.((f1 .* g1b .+ f2 .* g2b) ./ (sumf .+ EPS), F0, F1)
 
-    # -------- canopy wetness (per-canopy) --------
+    # -------- canopy wetness (per canopy) --------
     cv_safe = max.(cv_T, EPS)
-    W_can   = W_T ./ cv_safe                               # put W on canopy area basis
+    W_can   = W_T ./ cv_safe                                   # canopy-area basis
     Wratio  = clamp.(W_can ./ max.(Wmax_T, EPS), F0, F1)
     wetFrac = Wratio .^ (T(2)/T(3))
-    dryFrac = clamp.(F1 .- wetFrac, F0, F1)
-    dryFrac[:, :, :, end:end] .= F1                        # bare soil unaffected
+    dry_time_factor = clamp.(F1 .- T.(f_n) .* wetFrac, F0, F1)
+    dry_time_factor[:, :, :, end:end] .= F1                             # bare soil unaffected
 
     # -------- transpiration for vegetation tiles only --------
-    transpiration_veg =
-        cv_T[:, :, :, 1:veg_dim] .*                        # ensure T
-        dryFrac[:, :, :, 1:veg_dim] .*
-        potential_evaporation[:, :, :, 1:veg_dim] .*
-        g_sw_veg
+transpiration_veg =
+    cv_T[:, :, :, 1:veg_dim] .*
+    dry_time_factor[:, :, :, 1:veg_dim] .*
+    PE_T[:, :, :, 1:veg_dim] .*
+    g_sw_veg
 
     transpiration_veg = clamp.(transpiration_veg, F0, T(Inf))
 
     # split to layers (weights)
-    denom_veg = (f1 .* g1b .+ f2 .* g2b .+ EPS)
+    denom_veg = f1 .* g1b .+ f2 .* g2b .+ EPS
     E_1_t_veg = transpiration_veg .* (f1 .* g1b) ./ denom_veg
     E_2_t_veg = transpiration_veg .* (f2 .* g2b) ./ denom_veg
 
-    # GPU-safe NaN guards (branches match eltype T)
+    # GPU-safe NaN guards
     E_1_t_veg = ifelse.(isnan.(E_1_t_veg), F0, E_1_t_veg)
     E_2_t_veg = ifelse.(isnan.(E_2_t_veg), F0, E_2_t_veg)
 
-    # -------- pad bare-soil slice with zeros to (… , nveg) --------
-    transpiration_full = CUDA.zeros(T, size(cv_T))
-    E_1_t_full         = CUDA.zeros(T, size(cv_T))
-    E_2_t_full         = CUDA.zeros(T, size(cv_T))
+    # -------- assemble full-tile arrays with bare slice = 0 --------
+    transpiration_full = CUDA.zeros(T, ny, nx, 1, nveg)
+    E_1_t_full         = CUDA.zeros(T, ny, nx, 1, nveg)
+    E_2_t_full         = CUDA.zeros(T, ny, nx, 1, nveg)
 
     transpiration_full[:, :, :, 1:veg_dim] .= transpiration_veg
     E_1_t_full[:, :, :, 1:veg_dim]        .= E_1_t_veg

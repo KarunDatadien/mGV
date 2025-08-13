@@ -114,17 +114,17 @@ println("Soil moisture at position [3,21,1]: ", Array(soil_moisture_new[4:4, 22:
             
             @timeit to "calculate_max_water_storage" max_water_storage = calculate_max_water_storage(LAI_gpu, cv_gpu, coverage_gpu) # Eq. (2), works ✅ TODO: this only needs to be calculated ONCE, so put outside the loop
 
-            @timeit to "calculate_canopy_evaporation" canopy_evaporation = calculate_canopy_evaporation(
-                water_storage, max_water_storage, potential_evaporation, aerodynamic_resistance, rarc_gpu, prec_gpu, cv_gpu, rmin_gpu, LAI_gpu, tair_gpu, elev_gpu
-            ) # Eq. (1), (9) and (10), works ✅
+            @timeit to "calculate_canopy_evaporation" canopy_evaporation, f_n = calculate_canopy_evaporation(
+    water_storage, max_water_storage, potential_evaporation, aerodynamic_resistance, rarc_gpu, prec_gpu, cv_gpu, rmin_gpu, LAI_gpu, tair_gpu, elev_gpu
+) # Eq. (1), (9) and (10), works ✅
 
             
             # TODO: transpiration, E_1_t and E_2_t output gives missing values on parts of the grid
-            @timeit to "calculate_transpiration" transpiration, E_1_t, E_2_t, g_sw_1, g_sw_2, g_sw = calculate_transpiration(
-                potential_evaporation, aerodynamic_resistance, rarc_gpu, 
-                water_storage, max_water_storage, soil_moisture_old, soil_moisture_critical, wilting_point, 
-                root_gpu, rmin_gpu, LAI_gpu, cv_gpu
-            ) # Eq. (5), 🚧 TODO: check the gsm_inv multiplication
+@timeit to "calculate_transpiration" transpiration, E_1_t, E_2_t, g_sw_1, g_sw_2, g_sw = calculate_transpiration(
+    potential_evaporation, aerodynamic_resistance, rarc_gpu, 
+    water_storage, max_water_storage, soil_moisture_old, soil_moisture_critical, wilting_point, 
+    root_gpu, rmin_gpu, LAI_gpu, cv_gpu, f_n
+)# Eq. (5), 🚧 TODO: check the gsm_inv multiplication
 
 
             println("Sample transpiration[4,22,1,1]: ", Array(transpiration[4:4, 22:22, 1:1, 1:1])[1])
@@ -149,7 +149,12 @@ println("Soil moisture at position [3,21,1]: ", Array(soil_moisture_new[4:4, 22:
 #                prec_gpu, throughfall, soil_moisture_old, soil_moisture_max, b_infilt_gpu, cv_gpu
 #            ) # Eq. (18a) and (18b)
 
-            infiltration = sum_with_nan_handling(throughfall, 4) - surface_runoff
+total_input = sum_with_nan_handling(throughfall, 4)
+infiltration_raw = total_input .- surface_runoff
+infiltration = max.(infiltration_raw, zero(eltype(infiltration_raw)))
+
+# Optional debugging:
+ println("neg. infiltration cells = ", count(<(0), Array(infiltration_raw)))
 
             soil_moisture_new, subsurface_runoff, Q12 = solve_runoff_and_drainage(
                 infiltration,         # Water reaching the soil surface (2D array)
@@ -278,11 +283,14 @@ println("3 BEFORE OUTPUT Soil moisture at position [4,22,1]: ", Array(soil_moist
         sum_with_nan_handling(convcv(potential_evaporation_processed) .* potential_evaporation_processed, 4)
     )
 
-    water_storage_processed = san_nan(water_storage)
-    water_storage_output[:, :, day, :]      = Array(water_storage_processed)
-    water_storage_summed_output[:, :, day]  = Array(
-        sum_with_nan_handling(convcv(water_storage_processed) .* water_storage_processed, 4)
-    )
+# water storage (grid-cell)
+water_storage_processed = san_nan(water_storage)               # still per-canopy
+water_storage_output[:, :, day, :]     = Array(water_storage_processed)
+water_storage_summed_output[:, :, day] = Array(
+    sum_with_nan_handling(convcv(water_storage_processed) .* water_storage_processed, 4)
+)
+
+
 
     net_radiation_processed = san_nan(net_radiation)
     net_radiation_output[:, :, day, :]      = Array(net_radiation_processed)
@@ -290,17 +298,20 @@ println("3 BEFORE OUTPUT Soil moisture at position [4,22,1]: ", Array(soil_moist
         sum_with_nan_handling(convcv(net_radiation_processed) .* net_radiation_processed, 4)
     )
 
-    canopy_evaporation_processed = san_nan(canopy_evaporation)
-    canopy_evaporation_output[:, :, day, :]      = Array(canopy_evaporation_processed)
-    canopy_evaporation_summed_output[:, :, day]  = Array(
-        sum_with_nan_handling(convcv(canopy_evaporation_processed) .* canopy_evaporation_processed, 4)
-    )
+# --- canopy evaporation (make 4-D output a grid-cell field) ---
+canopy_evaporation_processed = san_nan(canopy_evaporation)
+canopy_evaporation_gc = convcv(canopy_evaporation_processed) .* canopy_evaporation_processed
+canopy_evaporation_output[:, :, day, :]      = Array(canopy_evaporation_gc)
+canopy_evaporation_summed_output[:, :, day]  = Array(
+    sum_with_nan_handling(canopy_evaporation_gc, 4)
+)
 
-    max_water_storage_processed = san_nan(max_water_storage)
-    max_water_storage_output[:, :, day, :]     = Array(max_water_storage_processed)
-    max_water_storage_summed_output[:, :, day] = Array(
-        sum_with_nan_handling(max_water_storage_processed, 4)
-    )
+# max water storage (grid-cell)
+max_water_storage_processed = san_nan(max_water_storage)       # still per-canopy
+max_water_storage_output[:, :, day, :]     = Array(max_water_storage_processed)
+max_water_storage_summed_output[:, :, day] = Array(
+    sum_with_nan_handling(convcv(max_water_storage_processed) .* max_water_storage_processed, 4)
+)
 
     wilting_point_output[:, :, :]          = Array(wilting_point)
     soil_moisture_critical_output[:, :, :] = Array(soil_moisture_critical)
