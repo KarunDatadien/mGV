@@ -124,22 +124,26 @@ end
 #end
 
 
-"""
-    calculate_baseflow(bottom_moisture, resid_moist, max_moist, Dsmax, Ds, Ws, c_expt)
+# VIC Eq. 21a–21b (Liang 1994)
+function calculate_baseflow(W, Wres, Wc, Dsmax, Ds, Ws, c_exp)
+    # Work with absolute storages; Ws is a fraction in (0,1)
+    WsWc  = Ws .* Wc                  # threshold storage
+    term1 = (Ds .* Dsmax) .* (W ./ max.(WsWc, eps(eltype(W))))  # linear part
 
-Calculates baseflow from the bottom soil layer using the ARNO model.
-"""
-function calculate_baseflow(bottom_moisture, resid_moist, max_moist, Dsmax, Ds, Ws, c_expt)
-    EPSILON = 1.0f-9
-    rel_moist = (bottom_moisture .- resid_moist) ./ (max_moist .- resid_moist .+ EPSILON)
-    rel_moist = clamp.(rel_moist, 0.0f0, 1.0f0)
-    frac = Dsmax .* Ds ./ Ws
-    baseflow = frac .* rel_moist
-    is_above_ws = rel_moist .> Ws
-    frac_nonlinear = (rel_moist .- Ws) ./ (1.0f0 .- Ws .+ EPSILON)
-    baseflow .+= is_above_ws .* Dsmax .* (1.0f0 .- Ds ./ Ws) .* (frac_nonlinear .^ c_expt)
-    return clamp.(baseflow, 0.0f0, Inf32)
+    # Below threshold: purely linear
+    Qb_lin = term1
+
+    # Above threshold: add nonlinear part
+    num   = max.(W .- WsWc, 0)
+    den   = max.(Wc .- WsWc, eps(eltype(W)))
+    nonlin = (Dsmax .- (Ds .* Dsmax) ./ Ws) .* (num ./ den) .^ c_exp
+
+    Qb = ifelse.(W .<= WsWc, Qb_lin, term1 .+ nonlin)
+    # Do not withdraw more than available above residual
+    avail = max.(W .- Wres, 0)
+    return clamp.(Qb, 0, avail)
 end
+
 
 
 """

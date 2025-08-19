@@ -162,6 +162,7 @@ function calculate_canopy_evaporation(
     # ---- convert your veg PET (with rc) -> wet-canopy PET (rc = 0) via PM denominator ratio ----
     den_rc  = slope .+ gamma_ .* (1 .+ (rc .+ ralpha) ./ ra)         # PET denominator you used
     den_w   = slope .+ gamma_ .* (1 .+ ralpha ./ ra)                 # rc = 0, keep rα
+    
     E_p_wet = potential_evaporation .* (den_rc ./ max.(den_w, tiny)) # mm / Δt
 
     # ---- VIC Eq. (1): (W/Wm)^(2/3) * E_p_wet * ra/(ra + rα) ----
@@ -355,20 +356,34 @@ end
 
 
 
-function update_water_canopy_storage(water_storage, prec_gpu, cv_gpu, canopy_evaporation, max_water_storage, throughfall, coverage)
+#function update_water_canopy_storage(water_storage, prec_gpu, cv_gpu, canopy_evaporation, max_water_storage, throughfall, coverage)
+#
+#    # Calculate new water storage: current storage + (precipitation - canopy evaporation)
+##    new_water_storage = water_storage .+ (prec_gpu .* cv_gpu .* coverage) .- canopy_evaporation
+#    new_water_storage = water_storage .+ (prec_gpu .* cv_gpu) .- canopy_evaporation
+#
+#    # Compute throughfall: excess water beyond max storage
+#    throughfall = max.(0, new_water_storage .- max_water_storage)
+#    
+#    # Update water storage: clamp between 0 and max_water_storage
+#    water_storage = max.(0.0, min.(new_water_storage, max_water_storage))
+#    
+#    return (water_storage), throughfall 
+#end
 
-    # Calculate new water storage: current storage + (precipitation - canopy evaporation)
-#    new_water_storage = water_storage .+ (prec_gpu .* cv_gpu .* coverage) .- canopy_evaporation
-    new_water_storage = water_storage .+ (prec_gpu .* cv_gpu) .- canopy_evaporation
+function update_water_canopy_storage(water_storage, prec, cv, canopy_evap, Wm, throughfall, coverage)
+    # Canopy water balance is per canopy area (Liang 1994, Eq. 16)
+    new_storage = water_storage .+ prec .- canopy_evap
+    excess      = max.(0.0, new_storage .- Wm)           # P′_l in Eq. 16 (only when W hits Wm)
+    water_storage = clamp.(new_storage, 0.0, Wm)
 
-    # Compute throughfall: excess water beyond max storage
-    throughfall = max.(0, new_water_storage .- max_water_storage)
-    
-    # Update water storage: clamp between 0 and max_water_storage
-    water_storage = max.(0.0, min.(new_water_storage, max_water_storage))
-    
-    return (water_storage), throughfall 
+    # Throughfall that reaches the ground must be grid-area weighted
+    throughfall = cv .* excess
+    return water_storage, throughfall
 end
+
+
+
 
 # Eq. (23): Total evapotranspiration
 function calculate_total_evapotranspiration(canopy_evaporation, transpiration, soil_evaporation, cv_gpu)

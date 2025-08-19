@@ -49,7 +49,13 @@ soil_moisture_old = init_moist_gpu
 #soil_moisture_new = field_capacity, outer=(1, 1, 1, size(coverage_gpu, 4)))
 soil_moisture_max = soil_moisture_max
 
-println("Soil moisture at position [4,22,1]: ", Array(soil_moisture_new[4:4, 22:22, 1:1])[1])
+# After you load static fields
+println("Wmax (mean) [mm]: L1=", mean(Array(soil_moisture_max[:,:,1])),
+                             " L2=", mean(Array(soil_moisture_max[:,:,2])),
+                             " L3=", mean(Array(soil_moisture_max[:,:,3])))
+println("Ksat (median) [mm/day]: L1=", median(Array(ksat_gpu[:,:,1])),
+                                   " L2=", median(Array(ksat_gpu[:,:,2])),
+                                   " L3=", median(Array(ksat_gpu[:,:,3])))
 
 function process_year(year)
 
