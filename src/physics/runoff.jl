@@ -27,7 +27,7 @@ function calculate_surface_runoff(prec_gpu, throughfall, soil_moisture_old, soil
 
     # Physically bound runoff by available input
     runoff = clamp.(runoff, T(0), total_water_input)
-    return runoff
+    return runoff, A_sat
 end
 
 

@@ -132,7 +132,7 @@ end
 function calculate_canopy_evaporation(
     water_storage, max_water_storage, potential_evaporation,
     aerodynamic_resistance, rarc, prec_gpu, cv_gpu, rmin, LAI_gpu,
-    tair_gpu, elev_gpu
+    tair_gpu, elev_gpu,
 )
     # ---- sanitize ----
     potential_evaporation .= ifelse.(isnan.(potential_evaporation) .| (abs.(potential_evaporation) .> fillvalue_threshold), 0.0, potential_evaporation)

@@ -152,6 +152,58 @@ function create_output_netcdf(output_file::String, reference_array, reference_ar
 
     topsoil_moisture_addition_output = defVar(out_ds, "topsoil_moisture_addition_output", float_type, ("lon", "lat", "time"))
 
+    # New output variables
+    delintercept_output = defVar(out_ds, "delintercept_output", float_type, ("lon", "lat", "time", "nveg"))
+    delintercept_output.attrib["units"] = "mm"
+    delintercept_output.attrib["description"] = "Change in canopy interception storage"
+
+    inflow_output = defVar(out_ds, "inflow_output", float_type, ("lon", "lat", "time", "nveg"))
+    inflow_output.attrib["units"] = "mm"
+    inflow_output.attrib["description"] = "Water inflow to soil layers"
+
+    surfstor_output = defVar(out_ds, "surfstor_output", float_type, ("lon", "lat", "time", "nveg"))
+    surfstor_output.attrib["units"] = "mm"
+    surfstor_output.attrib["description"] = "Surface water storage"
+
+    delsurfstor_output = defVar(out_ds, "delsurfstor_output", float_type, ("lon", "lat", "time", "nveg"))
+    delsurfstor_output.attrib["units"] = "mm"
+    delsurfstor_output.attrib["description"] = "Change in surface water storage"
+
+    delsoilmoist_output = defVar(out_ds, "delsoilmoist_output", float_type, ("lon", "lat", "time", "layer"))
+    delsoilmoist_output.attrib["units"] = "kg/m^3"
+    delsoilmoist_output.attrib["description"] = "Change in soil moisture"
+
+    asat_output = defVar(out_ds, "asat_output", float_type, ("lon", "lat", "time"))
+    asat_output.attrib["units"] = "fraction"
+    asat_output.attrib["description"] = "Fraction of saturated area"
+
+    latent_output = defVar(out_ds, "latent_output", float_type, ("lon", "lat", "time", "nveg"))
+    latent_output.attrib["units"] = "W/m^2"
+    latent_output.attrib["description"] = "Latent heat flux"
+
+    sensible_output = defVar(out_ds, "sensible_output", float_type, ("lon", "lat", "time", "nveg"))
+    sensible_output.attrib["units"] = "W/m^2"
+    sensible_output.attrib["description"] = "Sensible heat flux"
+
+    grnd_flux_output = defVar(out_ds, "grnd_flux_output", float_type, ("lon", "lat", "time", "nveg"))
+    grnd_flux_output.attrib["units"] = "W/m^2"
+    grnd_flux_output.attrib["description"] = "Ground heat flux"
+
+    vp_output = defVar(out_ds, "vp_output", float_type, ("lon", "lat", "time"))
+    vp_output.attrib["units"] = "kPa"
+    vp_output.attrib["description"] = "Vapor pressure"
+
+    vpd_output = defVar(out_ds, "vpd_output", float_type, ("lon", "lat", "time"))
+    vpd_output.attrib["units"] = "Pa"
+    vpd_output.attrib["description"] = "Vapor pressure deficit"
+
+    surf_cond_output = defVar(out_ds, "surf_cond_output", float_type, ("lon", "lat", "time", "nveg"))
+    surf_cond_output.attrib["units"] = "m/s"
+    surf_cond_output.attrib["description"] = "Surface conductance"
+
+    density_output = defVar(out_ds, "density_output", float_type, ("lon", "lat", "time"))
+    density_output.attrib["units"] = "kg/m^3"
+    density_output.attrib["description"] = "Air density"
 
     return out_ds, precipitation_output, water_storage_output, water_storage_summed_output, Q12_output, 
            tair_output, tsurf_output, canopy_evaporation_output,
@@ -161,6 +213,9 @@ function create_output_netcdf(output_file::String, reference_array, reference_ar
            soil_evaporation_output, soil_temperature_output, soil_moisture_output,  total_et_output, total_runoff_output,
            kappa_array_output, cs_array_output, wilting_point_output, soil_moisture_max_output, soil_moisture_critical_output,
            E_1_t_output, E_2_t_output, g_sw_1_output, g_sw_2_output, g_sw_output, residual_moisture_output, 
-           throughfall_output, throughfall_summed_output, topsoil_moisture_addition_output
+           throughfall_output, throughfall_summed_output, topsoil_moisture_addition_output,
+           delintercept_output, inflow_output, surfstor_output, delsurfstor_output, delsoilmoist_output,
+           asat_output, latent_output, sensible_output, grnd_flux_output, vp_output, vpd_output,
+           surf_cond_output, density_output
 
 end

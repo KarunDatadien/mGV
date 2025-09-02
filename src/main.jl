@@ -80,7 +80,10 @@ function process_year(year)
           soil_evaporation_output, soil_temperature_output, soil_moisture_output, total_et_output, total_runoff_output, 
           kappa_array_output, cs_array_output, wilting_point_output, soil_moisture_max_output, soil_moisture_critical_output,
           E_1_t_output, E_2_t_output, g_sw_1_output, g_sw_2_output, g_sw_output, residual_moisture_output, 
-          throughfall_output, throughfall_summed_output, topsoil_moisture_addition_output =
+          throughfall_output, throughfall_summed_output, topsoil_moisture_addition_output, delintercept_output, 
+          inflow_output, surfstor_output, delsurfstor_output, delsoilmoist_output,
+          asat_output, latent_output, sensible_output, grnd_flux_output, vp_output, vpd_output,
+          surf_cond_output, density_output =
           create_output_netcdf(output_file, prec_cpu, LAI_cpu, float_type, lat_cpu, lon_cpu)
 
 println("Soil moisture at position [3,21,1]: ", Array(soil_moisture_new[4:4, 22:22, 1:1])[1])
@@ -88,6 +91,15 @@ println("Soil moisture at position [3,21,1]: ", Array(soil_moisture_new[4:4, 22:
     num_days = size(prec_cpu, 3)
     day_prev = 0
     month_prev = 0
+
+    # --- Preallocate diagnostic arrays & state trackers (added by patch) ---
+    # Ensure these exist before in-place broadcasting below.
+    prev_water_storage = copy(water_storage)                # initialize for day 1
+    delintercept = CUDA.zeros(float_type, size(water_storage))  # (lon,lat,nveg)
+ #   inflow        = CUDA.zeros(float_type, size(throughfall))   # (lon,lat,nveg)
+    delsoilmoist  = CUDA.zeros(float_type, size(soil_moisture_new))  # (lon,lat,layer)
+    surfstor      = CUDA.zeros(float_type, size(coverage_gpu))  # (lon,lat,nveg) placeholder until implemented
+    delsurfstor   = CUDA.zeros(float_type, size(coverage_gpu))  # (lon,lat,nveg) placeholder until implemented
 
     # Start year long loop with daily timestep
     @showprogress "Processing year $year (GPU)..." for day in 1:num_days
@@ -149,7 +161,7 @@ println("Soil moisture at position [3,21,1]: ", Array(soil_moisture_new[4:4, 22:
             
             # Now throughfall has values for all tiles (veg + bare); proceed to surface_runoff
             surface_runoff = calculate_surface_runoff(prec_gpu, throughfall, soil_moisture_old, soil_moisture_max, b_infilt_gpu, cv_gpu)
-
+            surface_runoff, asat = calculate_surface_runoff(prec_gpu, throughfall, soil_moisture_old, soil_moisture_max, b_infilt_gpu, cv_gpu)      
             # Direct surface runoff
 #            @timeit to "calculate_surface_runoff" surface_runoff = calculate_surface_runoff(
 #                prec_gpu, throughfall, soil_moisture_old, soil_moisture_max, b_infilt_gpu, cv_gpu
@@ -244,6 +256,51 @@ ra_eff = 1.0 ./ max.(ra_eff_inv, eps(eltype(ra_eff_inv)))
 println("3 BEFORE OUTPUT Soil moisture at position [4,22,1]: ", Array(soil_moisture_new[4:4, 22:22, 1:1])[1])
 
 
+delintercept .= water_storage .- prev_water_storage  # Difference in canopy storage
+#inflow .= throughfall  # Initial inflow (modify if C-code includes additional terms)
+
+
+
+inflow = throughfall
+delsoilmoist .= soil_moisture_new .- soil_moisture_old  # Change in soil moisture
+
+
+vpd_output[:, :, day] = Array(calculate_vpd(tair_gpu, vp_gpu))  # Already handled in output
+
+# Update prev_water_storage for next iteration
+    prev_water_storage = copy(water_storage)
+
+
+# --- Simple fluxes (per tile) using air-temperature Lv ---
+ny, nx = size(tair_gpu, 1), size(tair_gpu, 2)
+nveg    = size(cv_gpu, 4)
+
+# Per-tile ET (mm/day): veg tiles get canopy_evap + transpiration; bare tile gets soil_evap
+et_tile = CUDA.zeros(float_type, size(cv_gpu))
+et_tile[:, :, :, 1:nveg-1] .= canopy_evaporation[:, :, :, 1:nveg-1] .+ transpiration[:, :, :, 1:nveg-1]
+et_tile[:, :, :, nveg:nveg] .= soil_evaporation
+
+# Lv from air temperature (J/kg)
+latent_heat = calculate_latent_heat(tair_gpu .+ 273.15)
+Lv4 = reshape(latent_heat, ny, nx, 1, 1)
+
+# Latent heat flux LE (W/m^2)
+latent = rho_w .* Lv4 .* (et_tile ./ (day_sec .* mm_in_m))
+
+# Sensible heat flux H (W/m^2) — bulk formula per tile
+ΔT = reshape(tsurf .- tair_gpu, ny, nx, 1, 1)
+ra_safe = max.(aerodynamic_resistance, eps(eltype(aerodynamic_resistance)))
+sensible = rho_a .* c_p_air .* (ΔT ./ ra_safe)
+
+# Ground heat flux by closure (W/m^2)
+grnd_flux = net_radiation .- latent .- sensible
+
+# Surface conductance proxy: broadcast total g_sw to tiles (keeps expected dims)
+surf_cond = reshape(g_sw, ny, nx, 1, 1) .* CUDA.ones(float_type, size(cv_gpu))
+
+
+
+
 @timeit to "outputs" begin
     # ---- GPU-safe sanitizers that keep each array's eltype ----
     san_nan = A -> begin
@@ -260,15 +317,33 @@ println("3 BEFORE OUTPUT Soil moisture at position [4,22,1]: ", Array(soil_moist
     tsurf_output[:, :, day] = Array(tsurf)
 
     aerodynamic_resistance_output[:, :, day, :]     = Array(aerodynamic_resistance)
-    aerodynamic_resistance_summed_output[:, :, day] = Array(sum_with_nan_handling(aerodynamic_resistance, 4))
+    aerodynamic_resistance_summed_output[:, :, day] = Array(ra_eff)
 
-    transpiration_output[:, :, day, :]         = Array(transpiration)
-    transpiration_summed_output[:, :, day]     = Array(sum_with_nan_handling(transpiration, 4))
+    transpiration_output[:, :, day, :]         = Array(transpiration .* coverage_gpu) 
+    transpiration_summed_output[:, :, day]     = Array(sum_with_nan_handling(transpiration .* coverage_gpu, 4))
 
     tair_output[:, :, day]                     = Array(tair_gpu)
     precipitation_output[:, :, day]            = Array(prec_gpu)
     throughfall_output[:, :, day, :]           = Array(throughfall)
     throughfall_summed_output[:, :, day]       = Array(sum_with_nan_handling(throughfall, 4))
+
+    # --- New outputs ---
+    delintercept_output[:, :, day, :]             = Array(delintercept)  # OUT_DELINTERCEPT
+    inflow_output[:, :, day, :]                = Array(inflow)        # OUT_INFLOW
+    surfstor_output[:, :, day, :]              = Array(surfstor)      # OUT_SURFSTOR
+    delsurfstor_output[:, :, day, :]           = Array(delsurfstor)   # OUT_DELSURFSTOR
+    delsoilmoist_output[:, :, day, :]          = Array(delsoilmoist)  # OUT_DELSOILMOIST
+    asat_output[:, :, day]                     = Array(asat)          # OUT_ASAT
+    latent_output[:, :, day, :]                = Array(latent)        # OUT_LATENT
+    sensible_output[:, :, day, :]              = Array(sensible)      # OUT_SENSIBLE
+    grnd_flux_output[:, :, day, :]             = Array(grnd_flux)     # OUT_GRND_FLUX
+    vp_output[:, :, day]                       = Array(vp_gpu)        # OUT_VP
+    vpd_output[:, :, day]                      = Array(calculate_vpd(tair_gpu, vp_gpu))  # OUT_VPD
+    surf_cond_output[:, :, day, :]             = Array(surf_cond)     # OUT_SURF_COND
+    # shape matches ("lon","lat")
+    density_output[:, :, day] = fill(float_type(rho_a), size(tair_gpu, 1), size(tair_gpu, 2))
+
+
 
     # --- processed fields (GPU-safe ifelse with array-typed literals) ---
     Q12_processed = san_zero(Q12)
@@ -293,7 +368,7 @@ println("3 BEFORE OUTPUT Soil moisture at position [4,22,1]: ", Array(soil_moist
 water_storage_processed = san_nan(water_storage)               # still per-canopy
 water_storage_output[:, :, day, :]     = Array(water_storage_processed)
 water_storage_summed_output[:, :, day] = Array(
-    sum_with_nan_handling(convcv(water_storage_processed) .* water_storage_processed, 4)
+    sum_with_nan_handling(convcv(water_storage_processed) .* water_storage_processed .* coverage_gpu, 4)
 )
 
 
@@ -306,7 +381,7 @@ water_storage_summed_output[:, :, day] = Array(
 
 # --- canopy evaporation (make 4-D output a grid-cell field) ---
 canopy_evaporation_processed = san_nan(canopy_evaporation)
-canopy_evaporation_gc = convcv(canopy_evaporation_processed) .* canopy_evaporation_processed
+canopy_evaporation_gc = convcv(canopy_evaporation_processed) .* canopy_evaporation_processed .* coverage_gpu
 canopy_evaporation_output[:, :, day, :]      = Array(canopy_evaporation_gc)
 canopy_evaporation_summed_output[:, :, day]  = Array(
     sum_with_nan_handling(canopy_evaporation_gc, 4)
