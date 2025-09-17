@@ -3,7 +3,7 @@ module SimConstants
            Ki, Kw, Kdry_org, Ks_org, 
            organic_frac, bulk_dens_org, soil_dens_org
 
-    const K_L = 0.2 # As used by Dickinson (1984) [mm]
+    const K_L = 0.1 
     const K = 0.4
     const z2 = 10
     const Ri_cr = 0.2
