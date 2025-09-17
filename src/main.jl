@@ -149,7 +149,7 @@ println("Soil moisture at position [3,21,1]: ", Array(soil_moisture_new[4:4, 22:
             println("Sample soil_moisture_old[4,22,1]: ", Array(soil_moisture_old[4:4, 22:22, 1:1])[1])
 
 
-            @timeit to "calculate_soil_evaporation" soil_evaporation = calculate_soil_evaporation(soil_moisture_old, soil_moisture_max, potential_evaporation, b_infilt_gpu, cv_gpu)
+            @timeit to "calculate_soil_evaporation" soil_evaporation = calculate_soil_evaporation(soil_moisture_old, soil_moisture_max, potential_evaporation, b_infilt_gpu, cv_gpu, coverage_gpu)
             
             # === Update Water Storage with Throughfall Computation; Eq. 16 ===
             @timeit to "update_water_canopy_storage" (water_storage, throughfall) = update_water_canopy_storage(

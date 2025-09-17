@@ -288,56 +288,53 @@ end
 
 # You might need to import the Printf module to use @printf
 using Printf
-function calculate_soil_evaporation(soil_moisture, soil_moisture_max, potential_evaporation, b_i, cv_gpu)
-    # Use the grid's shared top-layer moisture (NOT the bare-soil tile slice)
-    # Shapes:
-    #   soil_moisture, soil_moisture_max :: (ny, nx, nlayer)
-    #   potential_evaporation            :: (ny, nx, 1, nveg)
-    #   cv_gpu                           :: (ny, nx, 1, nveg)
-
+function calculate_soil_evaporation(soil_moisture, soil_moisture_max, potential_evaporation, b_i, cv_gpu, coverage_gpu)
+    # Calculate soil evaporation for ALL tiles, accounting for bare soil fraction in each
+    
     T = eltype(potential_evaporation)
     EPS = T(1e-9)
 
-    # 2D fields (ny, nx)
-    topsoil_moisture     = @view soil_moisture[:, :, 1]
-    topsoil_moisture_max = @view soil_moisture_max[:, :, 1]
+    # 2D fields (ny, nx) - convert to consistent type
+    topsoil_moisture     = T.(@view soil_moisture[:, :, 1])
+    topsoil_moisture_max = T.(@view soil_moisture_max[:, :, 1])
+    b_i_typed = T.(b_i)
 
     # Guard rails
     moisture_ratio = clamp.(topsoil_moisture ./ (topsoil_moisture_max .+ EPS), T(0), T(1))
 
     # A_sat (Xinanjiang curve)
-    A_sat = T(1) .- (T(1) .- moisture_ratio) .^ b_i
+    A_sat = T(1) .- (T(1) .- moisture_ratio) .^ b_i_typed
     A_sat = clamp.(A_sat, T(0), T(1))
     x = T(1) .- A_sat
 
     # Series S(b) from Liang 1994 (Eq. 15) — 2D
     S_series = CUDA.ones(T, size(x))
     @inbounds for n = 1:20
-        S_series .+= (b_i ./ (n .+ b_i)) .* (x .^ (n ./ b_i))
+        S_series .+= (b_i_typed ./ (n .+ b_i_typed)) .* (x .^ (n ./ b_i_typed))
     end
 
     # Infiltration ratio (Eq. 13) — 2D
-    infiltration_ratio = T(1) .- (T(1) .- A_sat) .^ (T(1) ./ b_i)
+    infiltration_ratio = T(1) .- (T(1) .- A_sat) .^ (T(1) ./ b_i_typed)
 
-    # Broadcast 2D fields to the bare-soil PET slice (ny, nx, 1, 1)
-    A_sat4   = reshape(A_sat,   size(A_sat,1),   size(A_sat,2),   1, 1)
-    x4       = reshape(x,       size(x,1),       size(x,2),       1, 1)
-    S4       = reshape(S_series,size(S_series,1),size(S_series,2),1, 1)
+    # Reshape 2D fields to (ny, nx, 1, 1) for broadcasting
+    A_sat4   = reshape(A_sat,              size(A_sat,1),              size(A_sat,2),              1, 1)
+    x4       = reshape(x,                  size(x,1),                  size(x,2),                  1, 1)
+    S4       = reshape(S_series,           size(S_series,1),           size(S_series,2),           1, 1)
     infil4   = reshape(infiltration_ratio, size(infiltration_ratio,1), size(infiltration_ratio,2), 1, 1)
 
-    # Bare-soil potential evaporation slice
-    Ep_soil = potential_evaporation[:, :, :, end:end]  # (ny, nx, 1, 1)
-
-    # Unsaturated + saturated contributions (Eqs. 14–15)
-    Ev_unsat = Ep_soil .* infil4 .* x4 .* S4
-    Ev_sat   = Ep_soil .* A_sat4
-
+    # Calculate soil evaporation for ALL tiles
+    Ev_unsat = potential_evaporation .* infil4 .* x4 .* S4
+    Ev_sat   = potential_evaporation .* A_sat4
+    
     total_soil_evaporation = Ev_sat .+ Ev_unsat
 
-    # Scale by bare-soil fraction (apply cv only here)
-    scaled_soil_evaporation = total_soil_evaporation #.* cv_gpu[:, :, :, end:end]
+    # Scale by exposed soil fraction for each tile
+    bare_soil_fraction = T(1) .- T.(coverage_gpu)
+    scaled_soil_evaporation = total_soil_evaporation .* T.(cv_gpu) .* bare_soil_fraction
 
-    return scaled_soil_evaporation
+    # Sum across all vegetation types to get total soil evaporation
+    # This returns (ny, nx, 1, 1) like your original function
+    return sum(scaled_soil_evaporation, dims=4, init=T(0))
 end
 
 
