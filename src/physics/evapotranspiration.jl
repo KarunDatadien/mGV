@@ -193,17 +193,6 @@ function calculate_canopy_evaporation(
 end
 
 
-
-
-#=
-This function has been updated to fix the GPU type-compatibility error.
-
-The problem was caused by mixing input arrays of different precisions
-(Float64 and Float32). The fix is to explicitly convert the Float64
-inputs to Float32 at the beginning of the function. This ensures all
-subsequent calculations are type-stable and GPU-compatible.
-=#
-
 using CUDA
 using Printf
 
@@ -257,7 +246,7 @@ function calculate_transpiration(
     dry_time_factor[:, :, :, end:end] .= F1                             # bare soil unaffected
 
     # -------- transpiration for vegetation tiles only --------
-transpiration_veg =
+    transpiration_veg =
     cv_T[:, :, :, 1:veg_dim] .*
     dry_time_factor[:, :, :, 1:veg_dim] .*
     PE_T[:, :, :, 1:veg_dim] .*
@@ -290,8 +279,6 @@ transpiration_veg =
 
     return transpiration_full, E_1_t_full, E_2_t_full, g1, g2, g_sw_total
 end
-
-
 
 
 
@@ -348,7 +335,7 @@ function calculate_soil_evaporation(soil_moisture, soil_moisture_max, potential_
     total_soil_evaporation = Ev_sat .+ Ev_unsat
 
     # Scale by bare-soil fraction (apply cv only here)
-    scaled_soil_evaporation = total_soil_evaporation .* cv_gpu[:, :, :, end:end]
+    scaled_soil_evaporation = total_soil_evaporation #.* cv_gpu[:, :, :, end:end]
 
     return scaled_soil_evaporation
 end
@@ -388,10 +375,10 @@ end
 # Eq. (23): Total evapotranspiration
 function calculate_total_evapotranspiration(canopy_evaporation, transpiration, soil_evaporation, cv_gpu)
     # Sum canopy evaporation and transpiration for vegetated classes (n = 1:nveg-1)
-    vegetated_et = cv_gpu[:, :, :, 1:end-1] .* (canopy_evaporation[:, :, :, 1:end-1]) .+ transpiration[:, :, :, 1:end-1] # cv_gpu[:, :, :, 1:end-1] .* 
+    vegetated_et = cv_gpu[:, :, :, 1:end-1] .* (canopy_evaporation[:, :, :, 1:end-1]) .+ transpiration[:, :, :, 1:end-1] .* cv_gpu[:, :, :, 1:end-1]  
     
     # Add bare soil evaporation (n = nveg)
-    bare_soil_et =  soil_evaporation # cv_gpu[:, :, :, end:end] .*
+    bare_soil_et =  soil_evaporation .* cv_gpu[:, :, :, end:end] 
     
     # Total evapotranspiration (sum across cover classes)
     total_et = sum_with_nan_handling(vegetated_et, 4) .+ bare_soil_et
