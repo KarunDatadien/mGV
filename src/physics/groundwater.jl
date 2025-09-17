@@ -76,11 +76,32 @@ end
 Calculates the gravitational drainage (flux) between two soil layers based on the
 Brooks-Corey formulation used in the VIC model.
 """
+#function calculate_interlayer_drainage(Ksat, current_moisture, max_moisture, residual_moisture, expt)
+#    drainage_ratio = (current_moisture .- residual_moisture) ./ (max_moisture .- residual_moisture)
+#    drainage_ratio = clamp.(drainage_ratio, 0.0f0, 1.0f0)
+#    Q12 = Ksat .* drainage_ratio .^ expt
+#    return clamp.(Q12, 0.0f0, Inf32)
+#end
+
+
 function calculate_interlayer_drainage(Ksat, current_moisture, max_moisture, residual_moisture, expt)
-    drainage_ratio = (current_moisture .- residual_moisture) ./ (max_moisture .- residual_moisture)
-    drainage_ratio = clamp.(drainage_ratio, 0.0f0, 1.0f0)
-    Q12 = Ksat .* drainage_ratio .^ expt
-    return clamp.(Q12, 0.0f0, Inf32)
+    # VIC's exact calc_Q12 formula - keep same parameter names!
+    eff_init = current_moisture .- residual_moisture
+    eff_max = max_moisture .- residual_moisture
+    
+    # Avoid division by zero
+    if any(eff_max .<= 0) || any(expt .== 1.0)
+        return CUDA.zeros(eltype(current_moisture), size(current_moisture))
+    end
+    
+    term1 = eff_init .^ (1.0 .- expt)
+    term2 = Ksat ./ (eff_max .^ expt) .* (1.0 .- expt)
+    inner = max.(term1 .- term2, 1e-10)  # Prevent negative
+    
+    final_eff = inner .^ (1.0 ./ (1.0 .- expt))
+    Q12 = eff_init .- final_eff
+    
+    return max.(Q12, 0.0)
 end
 
 #function calculate_interlayer_drainage(
