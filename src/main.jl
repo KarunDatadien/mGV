@@ -299,6 +299,124 @@ grnd_flux = net_radiation .- latent .- sensible
 surf_cond = reshape(g_sw, ny, nx, 1, 1) .* CUDA.ones(float_type, size(cv_gpu))
 
 
+# Find spikes diagnostic - check on spike days
+if day in [20, 120, 200, 320]
+    println("\n=== SPIKE FINDER DIAGNOSTIC - Day $day ===")
+    
+    # Find max transpiration and its location
+    transp_array = Array(transpiration)
+    max_transp = maximum(transp_array)
+    
+    # Find all locations with high transpiration (>4.0 mm/day)
+    high_transp_indices = findall(x -> x > 4.0, transp_array)
+    
+    println("Maximum transpiration: $max_transp mm/day")
+    println("Number of cells with transpiration > 4.0 mm/day: $(length(high_transp_indices))")
+    
+    if length(high_transp_indices) > 0
+        # Examine the first few spike locations
+        for (idx_num, cart_idx) in enumerate(high_transp_indices[1:min(3, length(high_transp_indices))])
+            i, j, k, veg = cart_idx.I
+            transp_val = transp_array[i, j, k, veg]
+            
+            println("\n--- Spike Location #$idx_num: Grid ($i,$j) Veg_tile=$veg ---")
+            println("Transpiration: $transp_val mm/day")
+            
+            # Get detailed diagnostics for this location
+            W1_sample = Array(soil_moisture_old[i:i, j:j, 1:1])[1]
+            W2_sample = Array(soil_moisture_old[i:i, j:j, 2:2])[1]
+            Wcr1_sample = Array(soil_moisture_critical[i:i, j:j, 1:1])[1]
+            Wcr2_sample = Array(soil_moisture_critical[i:i, j:j, 2:2])[1]
+            Wwp1_sample = Array(wilting_point[i:i, j:j, 1:1])[1]
+            Wwp2_sample = Array(wilting_point[i:i, j:j, 2:2])[1]
+            
+            g1_sample = max(0.0, min(1.0, (W1_sample - Wwp1_sample) / (Wcr1_sample - Wwp1_sample + 1e-9)))
+            g2_sample = max(0.0, min(1.0, (W2_sample - Wwp2_sample) / (Wcr2_sample - Wwp2_sample + 1e-9)))
+            
+            f1_sample = Array(root_gpu[i:i, j:j, 1:1, veg:veg])[1]
+            f2_sample = Array(root_gpu[i:i, j:j, 2:2, veg:veg])[1]
+            
+            g_sw_sample = (f1_sample * g1_sample + f2_sample * g2_sample) / (f1_sample + f2_sample + 1e-9)
+            
+            cv_sample = Array(cv_gpu[i:i, j:j, 1:1, veg:veg])[1]
+            water_storage_sample = Array(water_storage[i:i, j:j, 1:1, veg:veg])[1]
+            max_water_storage_sample = Array(max_water_storage[i:i, j:j, 1:1, veg:veg])[1]
+            f_n_sample = Array(f_n[i:i, j:j, 1:1, veg:veg])[1]
+            
+            W_can_sample = water_storage_sample / max(cv_sample, 1e-9)
+            Wratio_sample = max(0.0, min(1.0, W_can_sample / max(max_water_storage_sample, 1e-9)))
+            wetFrac_sample = Wratio_sample^(2.0/3.0)
+            dry_time_factor_sample = max(0.0, min(1.0, 1.0 - f_n_sample * wetFrac_sample))
+            
+            PE_sample = Array(potential_evaporation[i:i, j:j, 1:1, veg:veg])[1]
+            
+            println("Soil moisture: L1=$W1_sample mm, L2=$W2_sample mm")
+            println("Soil stress: g1=$g1_sample, g2=$g2_sample, combined=$g_sw_sample")
+            println("Root fractions: f1=$f1_sample, f2=$f2_sample")
+            println("Coverage: cv=$cv_sample")
+            println("Canopy: storage=$water_storage_sample, max=$max_water_storage_sample")
+            println("Factors: f_n=$f_n_sample, dry_factor=$dry_time_factor_sample")
+            println("Potential evap: PE=$PE_sample mm/day")
+            println("Components: $PE_sample × $g_sw_sample × $dry_time_factor_sample = $(PE_sample * g_sw_sample * dry_time_factor_sample)")
+            
+            # Identify the culprit
+            if PE_sample > 10.0
+                println("*** CULPRIT: VERY HIGH POTENTIAL EVAPORATION ***")
+            elseif g_sw_sample > 0.9 && PE_sample > 5.0
+                println("*** CULPRIT: HIGH PE + LOW SOIL STRESS ***")
+            elseif dry_time_factor_sample > 0.95 && PE_sample > 3.0
+                println("*** CULPRIT: HIGH PE + DRY CANOPY ***")
+            end
+        end
+    else
+        println("No transpiration spikes found on this day.")
+    end
+    
+    println("=== END SPIKE FINDER ===\n")
+end
+
+
+# Add this RIGHT AFTER your transpiration calculation in main.jl
+# Place it immediately after the @timeit to "calculate_transpiration" block
+
+if day == 120
+    println("\n=== EXTERNAL DEBUG - Day $day ===")
+    
+    # Test the spike location - fix GPU indexing
+    i, j, veg = 7, 19, 1
+    
+    # Get soil moisture stress values (use Array() to copy to CPU)
+    g1_val = Array(g_sw_1)[i, j]
+    g2_val = Array(g_sw_2)[i, j]
+    
+    # Get root fractions 
+    f1_val = Array(root_gpu)[i, j, 1, veg]
+    f2_val = Array(root_gpu)[i, j, 2, veg]
+    
+    # Get transpiration result
+    transp_val = Array(transpiration)[i, j, 1, veg]
+    
+    # Manual calculation of what g_sw SHOULD be
+    layer2_should_dominate = (g2_val >= 0.99) && (f2_val >= 0.5)
+    layer1_should_dominate = (g1_val >= 0.99) && (f1_val >= 0.5) && !layer2_should_dominate
+    
+    expected_gsw = if layer2_should_dominate
+        1.0
+    elseif layer1_should_dominate  
+        1.0
+    else
+        (f1_val * g1_val + f2_val * g2_val) / (f1_val + f2_val)
+    end
+    
+    println("Soil stress: g1=$g1_val, g2=$g2_val")
+    println("Root fractions: f1=$f1_val, f2=$f2_val")
+    println("Layer 2 should dominate: $layer2_should_dominate")
+    println("Layer 1 should dominate: $layer1_should_dominate")
+    println("Expected g_sw: $expected_gsw")
+    println("Final transpiration: $transp_val mm/day")
+    
+    println("=== END EXTERNAL DEBUG ===\n")
+end
 
 
 @timeit to "outputs" begin
@@ -368,7 +486,7 @@ surf_cond = reshape(g_sw, ny, nx, 1, 1) .* CUDA.ones(float_type, size(cv_gpu))
 water_storage_processed = san_nan(water_storage)               # still per-canopy
 water_storage_output[:, :, day, :]     = Array(water_storage_processed)
 water_storage_summed_output[:, :, day] = Array(
-    sum_with_nan_handling(convcv(water_storage_processed) .* water_storage_processed .* coverage_gpu, 4)
+    sum_with_nan_handling(convcv(water_storage_processed) .* water_storage_processed, 4)
 )
 
 

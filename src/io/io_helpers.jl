@@ -93,3 +93,19 @@ function sum_with_nan_handling(arr::CuArray, dim::Int)
     return summed
 end
 
+
+san_nan(A) = begin
+    T   = eltype(A)
+    thr = T(fillvalue_threshold)
+    rep = T(NaN)
+    ifelse.(isnan.(A) .| (abs.(A) .> thr), rep, A)
+end
+
+san_zero(A) = begin
+    T   = eltype(A)
+    thr = T(fillvalue_threshold)
+    rep = T(0.0)
+    ifelse.(isnan.(A) .| (abs.(A) .> thr), rep, A)
+end
+
+convcv(A) = convert.(eltype(A), cv_gpu)  # cast cv to A's eltype

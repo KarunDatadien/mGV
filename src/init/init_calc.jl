@@ -4,9 +4,12 @@ function calculate_soil_properties(bulk_dens_gpu, soil_dens_gpu, depth_gpu, Wcr_
     bulk_dens_min = (bulk_dens_gpu .- organic_frac * bulk_dens_org) ./ (1 .- organic_frac)
     soil_dens_min = (soil_dens_gpu .- organic_frac * soil_dens_org) ./ (1 .- organic_frac)
 
-    # Calculate porosity and ensure non-negative values
-    porosity = 1 .- bulk_dens_min ./ soil_dens_min
+    bulk_density = (1 .- organic_frac) .* bulk_dens_min .+ organic_frac .* bulk_dens_org
+    soil_density = (1 .- organic_frac) .* soil_dens_min .+ organic_frac .* soil_dens_org
+
+    porosity = 1 .- bulk_density ./ soil_density
     porosity = max.(porosity, 0.0)
+
 
     # === Calculate Maximum Soil Moisture ===
     soil_moisture_max = depth_gpu .* porosity .* 1000
