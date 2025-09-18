@@ -34,18 +34,34 @@ global Q_12 = CUDA.zeros(float_type, size(Tavg_gpu))
 global soil_moisture_old = CUDA.zeros(float_type, size(soil_dens_gpu, 1), size(soil_dens_gpu, 2), size(soil_dens_gpu, 3))
 global soil_moisture_new = CUDA.zeros(float_type, size(soil_dens_gpu, 1), size(soil_dens_gpu, 2), size(soil_dens_gpu, 3))
 global soil_moisture_max = CUDA.zeros(float_type, size(soil_dens_gpu, 1), size(soil_dens_gpu, 2), size(soil_dens_gpu, 3))
+global soil_moisture_critical = CUDA.zeros(float_type, size(soil_dens_gpu, 1), size(soil_dens_gpu, 2), size(soil_dens_gpu, 3))
+global field_capacity = CUDA.zeros(float_type, size(soil_dens_gpu, 1), size(soil_dens_gpu, 2), size(soil_dens_gpu, 3))
+global wilting_point = CUDA.zeros(float_type, size(soil_dens_gpu, 1), size(soil_dens_gpu, 2), size(soil_dens_gpu, 3))
+global residual_moisture = CUDA.zeros(float_type, size(soil_dens_gpu, 1), size(soil_dens_gpu, 2), size(soil_dens_gpu, 3))
+
 
 soil_temperature[:, :, 1:1] = Tavg_gpu
 soil_temperature[:, :, 2:2] = Tavg_gpu
 soil_temperature[:, :, 3:3] = Tavg_gpu
 
 # === Calculate Soil Properties ===
-bulk_dens_min, soil_dens_min, porosity, soil_moisture_max, soil_moisture_critical, field_capacity, wilting_point, residual_moisture = 
+_bulk_dens_min, _soil_dens_min, _porosity, _soil_moisture_max, _soil_moisture_critical, _field_capacity, _wilting_point, _residual_moisture = 
     calculate_soil_properties(bulk_dens_gpu, soil_dens_gpu, depth_gpu, Wcr_gpu, Wfc_gpu, Wpwp_gpu, residmoist_gpu)
 
+# Copy values into existing GPU arrays
+bulk_dens_min .= _bulk_dens_min
+soil_dens_min .= _soil_dens_min  
+porosity .= _porosity
+soil_moisture_max .= _soil_moisture_max
+soil_moisture_critical .= _soil_moisture_critical
+field_capacity .= _field_capacity
+wilting_point .= _wilting_point
+residual_moisture .= _residual_moisture
+
 # Repeat init_moist_gpu along the 4th dimension (TODO: note, I may change init_moist_gpu here to field_capacity after discussions with modelling group)
-soil_moisture_new = init_moist_gpu
-soil_moisture_old = init_moist_gpu
+soil_moisture_old .= min.(init_moist_gpu, soil_moisture_max)
+soil_moisture_old .= max.(soil_moisture_old, residual_moisture)
+soil_moisture_new .= copy(soil_moisture_old)
 #soil_moisture_new = field_capacity, outer=(1, 1, 1, size(coverage_gpu, 4)))
 soil_moisture_max = soil_moisture_max
 
@@ -160,7 +176,7 @@ println("Soil moisture at position [3,21,1]: ", Array(soil_moisture_new[4:4, 22:
             throughfall[:, :, :, end:end] = prec_gpu .* cv_gpu[:, :, :, end:end]
             
             # Now throughfall has values for all tiles (veg + bare); proceed to surface_runoff
-            surface_runoff = calculate_surface_runoff(prec_gpu, throughfall, soil_moisture_old, soil_moisture_max, b_infilt_gpu, cv_gpu)
+ #           surface_runoff = calculate_surface_runoff(prec_gpu, throughfall, soil_moisture_old, soil_moisture_max, b_infilt_gpu, cv_gpu)
             surface_runoff, asat = calculate_surface_runoff(prec_gpu, throughfall, soil_moisture_old, soil_moisture_max, b_infilt_gpu, cv_gpu)      
             # Direct surface runoff
 #            @timeit to "calculate_surface_runoff" surface_runoff = calculate_surface_runoff(
@@ -200,10 +216,11 @@ infiltration = max.(infiltration_raw, zero(eltype(infiltration_raw)))
                 total_runoff = calculate_total_runoff(surface_runoff, subsurface_runoff, cv_gpu) # TODO: should we use subsurface_runoff_total or subsurface_runoff?
             end          
 
-            @timeit to "Set ice_frac sum"        ice_frac         = 0.0
-            
-            @timeit to "soil_conductivity"       kappa_array      = soil_conductivity( soil_moisture_new, ice_frac, soil_dens_min,
-                                                                   bulk_dens_min, quartz_gpu, organic_frac, porosity)
+ice_frac = CUDA.zeros(float_type, size(soil_moisture_new))  
+organic_frac_gpu = CUDA.fill(float_type(organic_frac), size(soil_moisture_new))  
+
+            @timeit to "soil_conductivity"       kappa_array = soil_conductivity(soil_moisture_new, ice_frac, soil_dens_min,
+                               bulk_dens_min, quartz_gpu, organic_frac_gpu, porosity)
             @timeit to "volumetric_heat_capacity" cs_array        = volumetric_heat_capacity(
                                                                    bulk_dens_gpu ./ soil_dens_gpu,
                                                                    soil_moisture_new ./ rho_w, ice_frac, organic_frac)

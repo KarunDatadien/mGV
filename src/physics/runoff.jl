@@ -62,8 +62,8 @@ function calculate_total_runoff(surface_runoff, subsurface_runoff, cv_gpu)
     subsurface_runoff .= ifelse.(isnan.(subsurface_runoff) .| (abs.(subsurface_runoff) .> fillvalue_threshold), 0.0, subsurface_runoff) # Q_b[n]
 
     # Sum surface and subsurface runoff, weighted by coverage
- #   total_runoff = sum_with_nan_handling(cv_gpu .* (surface_runoff .+ subsurface_runoff), 4) # C_v[n]
-     total_runoff = (surface_runoff .+ subsurface_runoff) # TODO: with or without cv_gpu?
+ #   total_runoff = sum_with_nan_handling(cv_gpu .* (surface_runoff .+ subsurface_runoff), 4) #./ 14. # C_v[n]
+    total_runoff = (surface_runoff .+ subsurface_runoff) # TODO: with or without cv_gpu?
 
     return total_runoff
 end
