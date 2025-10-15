@@ -19,7 +19,7 @@ julia --version
 
 ---
 
-### Activate the Project and Install Dependencies
+### Activate the project and install dependencies
 Needs to be done only once.
 
 ```bash
@@ -27,7 +27,7 @@ julia --project=. -e 'import Pkg; Pkg.instantiate()'
 ```
 
 
-### Run Command
+### Run command
 
 To run the program:
 
