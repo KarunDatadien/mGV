@@ -84,8 +84,6 @@ macro vars(names...)
 end
 
 
-
-
 function read_and_allocate_forcing(prefix::String, year::Int, varname::String)
     println("Loading $varname forcing input...")
 

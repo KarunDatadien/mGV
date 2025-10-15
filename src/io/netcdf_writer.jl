@@ -369,7 +369,7 @@ function write_daily_outputs(day, tsurf, aerodynamic_resistance, ra_eff,
         )
     )
     
-    # Soil properties (time-invariant but written each day)
+    # Soil properties (some are time-invariant but written each day for now)
     wilting_point_output[:, :, :] = Array(wilting_point)
     soil_moisture_critical_output[:, :, :] = Array(soil_moisture_critical)
     soil_moisture_max_output[:, :, :] = Array(soil_moisture_max)
