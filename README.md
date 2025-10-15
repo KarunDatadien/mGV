@@ -1,5 +1,5 @@
 # mGV
-mGV (Modular Global VIC solver) is a high-performance global land surface model in Julia, based on the VIC framework by Liang et al. (1994). It is a work-in-progress in it's early development phase. It supports GPU acceleration (currently supporting NVIDIA/CUDA only) to overcome computational barriers in water and food security assessments.
+mGV (Modular Global VIC solver) is a high-performance global macroscale hydrologic model programmed in Julia, based on the VIC framework by Liang et al. (1994). The code in this repo is a work-in-progress in it's early development phase. It supports GPU acceleration (currently supporting NVIDIA/CUDA only) to overcome computational barriers in water and food security assessments.
 
 <img width="1341" height="1244" alt="mGVcodeArchitecture" src="https://github.com/user-attachments/assets/296bd461-c28d-43f9-a887-a6c9ca94db15" />
 
