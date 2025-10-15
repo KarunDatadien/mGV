@@ -219,3 +219,161 @@ function create_output_netcdf(output_file::String, reference_array, reference_ar
            surf_cond_output, density_output
 
 end
+
+
+function write_daily_outputs(day, tsurf, aerodynamic_resistance, ra_eff, 
+                            transpiration, tair_gpu, prec_gpu, throughfall,
+                            delintercept, inflow, surfstor, delsurfstor, 
+                            delsoilmoist, asat, latent, sensible, grnd_flux, 
+                            vp_gpu, vpd, surf_cond, Q12, soil_evaporation, 
+                            soil_temperature, soil_moisture_new, total_et, 
+                            total_runoff, kappa_array, cs_array, 
+                            potential_evaporation, water_storage, net_radiation,
+                            canopy_evaporation, max_water_storage, wilting_point,
+                            soil_moisture_critical, soil_moisture_max, E_1_t, 
+                            E_2_t, residual_moisture, cv_gpu, coverage_gpu,
+                            # Output array references
+                            tsurf_output, aerodynamic_resistance_output,
+                            aerodynamic_resistance_summed_output, 
+                            transpiration_output, transpiration_summed_output,
+                            tair_output, precipitation_output, throughfall_output,
+                            throughfall_summed_output, delintercept_output,
+                            inflow_output, surfstor_output, delsurfstor_output,
+                            delsoilmoist_output, asat_output, latent_output,
+                            sensible_output, grnd_flux_output, vp_output,
+                            vpd_output, surf_cond_output, density_output,
+                            Q12_output, soil_evaporation_output,
+                            soil_temperature_output, soil_moisture_output,
+                            total_et_output, total_runoff_output,
+                            kappa_array_output, cs_array_output,
+                            potential_evaporation_output,
+                            potential_evaporation_summed_output,
+                            water_storage_output, water_storage_summed_output,
+                            net_radiation_output, net_radiation_summed_output,
+                            canopy_evaporation_output,
+                            canopy_evaporation_summed_output,
+                            max_water_storage_output,
+                            max_water_storage_summed_output,
+                            wilting_point_output, soil_moisture_critical_output,
+                            soil_moisture_max_output, E_1_t_output, E_2_t_output,
+                            residual_moisture_output)
+    
+    # GPU-safe sanitizers
+    san_nan = A -> begin
+        T = eltype(A)
+        thr = T(fillvalue_threshold)
+        rep = T(NaN)
+        ifelse.(isnan.(A) .| (abs.(A) .> thr), rep, A)
+    end
+    
+    san_zero = A -> begin
+        T = eltype(A)
+        thr = T(fillvalue_threshold)
+        rep = T(0.0)
+        ifelse.(isnan.(A) .| (abs.(A) .> thr), rep, A)
+    end
+    
+    convcv = A -> convert.(eltype(A), cv_gpu)
+
+    # Direct outputs
+    tsurf_output[:, :, day] = Array(tsurf)
+    aerodynamic_resistance_output[:, :, day, :] = Array(aerodynamic_resistance)
+    aerodynamic_resistance_summed_output[:, :, day] = Array(ra_eff)
+    
+    transpiration_output[:, :, day, :] = Array(transpiration .* coverage_gpu)
+    transpiration_summed_output[:, :, day] = Array(
+        sum_with_nan_handling(transpiration .* coverage_gpu, 4)
+    )
+    
+    tair_output[:, :, day] = Array(tair_gpu)
+    precipitation_output[:, :, day] = Array(prec_gpu)
+    throughfall_output[:, :, day, :] = Array(throughfall)
+    throughfall_summed_output[:, :, day] = Array(sum_with_nan_handling(throughfall, 4))
+    
+    # Diagnostic outputs
+    delintercept_output[:, :, day, :] = Array(delintercept)
+    inflow_output[:, :, day, :] = Array(inflow)
+    surfstor_output[:, :, day, :] = Array(surfstor)
+    delsurfstor_output[:, :, day, :] = Array(delsurfstor)
+    delsoilmoist_output[:, :, day, :] = Array(delsoilmoist)
+    asat_output[:, :, day] = Array(asat)
+    
+    # Energy balance outputs
+    latent_output[:, :, day, :] = Array(latent)
+    sensible_output[:, :, day, :] = Array(sensible)
+    grnd_flux_output[:, :, day, :] = Array(grnd_flux)
+    
+    # Atmospheric outputs
+    vp_output[:, :, day] = Array(vp_gpu)
+    vpd_output[:, :, day] = Array(vpd)
+    surf_cond_output[:, :, day, :] = Array(surf_cond)
+    density_output[:, :, day] = fill(
+        float_type(rho_a), size(tair_gpu, 1), size(tair_gpu, 2)
+    )
+    
+    # Processed outputs with sanitization
+    Q12_processed = san_zero(Q12)
+    Q12_output[:, :, day, :] = Array(Q12_processed)
+    
+    soil_evaporation_output[:, :, day, :] = Array(soil_evaporation)
+    soil_temperature_output[:, :, day, :] = Array(soil_temperature)
+    soil_moisture_output[:, :, day, :] = Array(soil_moisture_new)
+    
+    total_et_output[:, :, day] = Array(total_et)
+    total_runoff_output[:, :, day] = Array(total_runoff)
+    kappa_array_output[:, :, day, :] = Array(kappa_array)
+    cs_array_output[:, :, day, :] = Array(cs_array)
+    
+    # Potential evaporation
+    potential_evaporation_processed = san_nan(potential_evaporation)
+    potential_evaporation_output[:, :, day, :] = Array(potential_evaporation_processed)
+    potential_evaporation_summed_output[:, :, day] = Array(
+        sum_with_nan_handling(
+            convcv(potential_evaporation_processed) .* potential_evaporation_processed, 4
+        )
+    )
+    
+    # Water storage
+    water_storage_processed = san_nan(water_storage)
+    water_storage_output[:, :, day, :] = Array(water_storage_processed)
+    water_storage_summed_output[:, :, day] = Array(
+        sum_with_nan_handling(
+            convcv(water_storage_processed) .* water_storage_processed, 4
+        )
+    )
+    
+    # Net radiation
+    net_radiation_processed = san_nan(net_radiation)
+    net_radiation_output[:, :, day, :] = Array(net_radiation_processed)
+    net_radiation_summed_output[:, :, day] = Array(
+        sum_with_nan_handling(
+            convcv(net_radiation_processed) .* net_radiation_processed, 4
+        )
+    )
+    
+    # Canopy evaporation (grid-cell field)
+    canopy_evaporation_processed = san_nan(canopy_evaporation)
+    canopy_evaporation_gc = convcv(canopy_evaporation_processed) .* 
+                           canopy_evaporation_processed .* coverage_gpu
+    canopy_evaporation_output[:, :, day, :] = Array(canopy_evaporation_gc)
+    canopy_evaporation_summed_output[:, :, day] = Array(
+        sum_with_nan_handling(canopy_evaporation_gc, 4)
+    )
+    
+    # Max water storage
+    max_water_storage_processed = san_nan(max_water_storage)
+    max_water_storage_output[:, :, day, :] = Array(max_water_storage_processed)
+    max_water_storage_summed_output[:, :, day] = Array(
+        sum_with_nan_handling(
+            convcv(max_water_storage_processed) .* max_water_storage_processed, 4
+        )
+    )
+    
+    # Soil properties (time-invariant but written each day)
+    wilting_point_output[:, :, :] = Array(wilting_point)
+    soil_moisture_critical_output[:, :, :] = Array(soil_moisture_critical)
+    soil_moisture_max_output[:, :, :] = Array(soil_moisture_max)
+    E_1_t_output[:, :, day, :] = Array(E_1_t)
+    E_2_t_output[:, :, day, :] = Array(E_2_t)
+    residual_moisture_output[:, :, day, :] = Array(residual_moisture)
+end

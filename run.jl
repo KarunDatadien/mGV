@@ -7,6 +7,7 @@ include("src/constants/physical_constants.jl")
 
 # Utilities
 include("src/utils/runtime_utils.jl")
+include("src/utils/diagnostics.jl")
 
 # I/O Helpers
 include("src/io/io_helpers.jl")
