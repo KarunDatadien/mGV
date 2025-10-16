@@ -57,7 +57,7 @@ function compute_partial_canopy_resistance(rmin_gpu, LAI_gpu)
 end
 
 function calculate_net_radiation(swdown_gpu, lwdown_gpu, albedo_gpu, tsurf)
-    return (1.0 .- albedo_gpu) .* swdown_gpu .+ emissivity .* (lwdown_gpu .- sigma .* (tsurf .+ 273.15).^4)
+    return (1.0 .- albedo_gpu) .* swdown_gpu .+ lwdown_gpu .- emissivity .* sigma .* (tsurf .+ 273.15).^4
 end
 
 function calculate_potential_evaporation(
@@ -192,9 +192,6 @@ function calculate_canopy_evaporation(
     return canopy_evaporation, f_n
 end
 
-
-using CUDA
-using Printf
 
 function calculate_transpiration(
     potential_evaporation::CuArray, aerodynamic_resistance::CuArray, rarc_gpu::CuArray,
