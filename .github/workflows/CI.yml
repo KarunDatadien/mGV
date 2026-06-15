@@ -55,7 +55,44 @@ jobs:
           echo "=== validations/*.png ==="
           find validations/ -name "*.png" | sort || echo "(no PNGs found)"
 
-      # 6. Upload the generated plots
+      # 6. GitHub Step Summary table
+      - name: Simulation Summary
+        run: |
+          echo "## Validation Dashboard Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Basin |   Output   | VIC Reference | Plots |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|------------|---------------|-------|" >> $GITHUB_STEP_SUMMARY
+
+          for basin in mekong indus; do
+            # Check output
+            sim_file=$(find output_data/${basin}/ -name "*.nc" 2>/dev/null | head -1)
+            if [ -n "$sim_file" ]; then
+              sim_status="✅ Found"
+            else
+              sim_status="❌ Missing"
+            fi
+
+            # Check VIC reference
+            vic_file=$(find validations/${basin}_VICrun/ -name "*.nc" 2>/dev/null | head -1)
+            if [ -n "$vic_file" ]; then
+              vic_status="✅ Available"
+            else
+              vic_status="⚠️ Not available"
+            fi
+
+            # Check plots
+            plots=$(find validations/ -name "${basin}_*.png" 2>/dev/null | xargs -I{} basename {} | tr '\n' ' ')
+            if [ -n "$plots" ]; then
+              plot_status="\`${plots}\`"
+            else
+              plot_status="—"
+            fi
+
+            basin_label="$(tr '[:lower:]' '[:upper:]' <<< ${basin:0:1})${basin:1}"
+            echo "| **${basin_label}** | ${sim_status} | ${vic_status} | ${plot_status} |" >> $GITHUB_STEP_SUMMARY
+          done
+
+      # 7. Upload the generated plots
       - name: Upload plot artifacts
         uses: actions/upload-artifact@v4
         with:
