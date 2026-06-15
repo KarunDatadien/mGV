@@ -43,12 +43,19 @@ jobs:
           ls -la
           ls -la input_data/mekong/
 
-
       # 4. Execute the script
       - name: Run validations
         run: bash run_validations.sh
 
-      # 5. Upload the generated plots
+      # 5. Debug: show what was produced
+      - name: Debug output files
+        run: |
+          echo "=== output_data/ ==="
+          find output_data/ -type f | sort || echo "(empty or missing)"
+          echo "=== validations/*.png ==="
+          find validations/ -name "*.png" | sort || echo "(no PNGs found)"
+
+      # 6. Upload the generated plots
       - name: Upload plot artifacts
         uses: actions/upload-artifact@v4
         with:
