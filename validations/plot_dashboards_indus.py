@@ -150,16 +150,26 @@ def annotate(ax, v, m):
 def plot_var(ax, v_ts, m_ts, title, unit, xlabels=True):
     style_ax(ax, ylabel=unit, xlabels=xlabels)
     ax.set_title(title)
-    if v_ts is None or m_ts is None:
+    if v_ts is None and m_ts is None:
         ax.text(0.5, 0.5, "variable not found", transform=ax.transAxes,
                 ha='center', va='center', fontsize=9, color="#888888")
         return
-    n = min(len(v_ts), len(m_ts), 365)
-    x, v, m = DOY[:n], v_ts[:n], m_ts[:n]
-    ax.fill_between(x, v, m, color=MGV_C, alpha=FA)
-    ax.plot(x, v, color=VIC_C, lw=0.9, alpha=0.9)
-    ax.plot(x, m, color=MGV_C, lw=0.9, ls='--', alpha=0.85)
-    annotate(ax, v, m)
+    if v_ts is not None and m_ts is not None:
+        # Full comparison: both datasets available
+        n = min(len(v_ts), len(m_ts), 365)
+        x, v, m = DOY[:n], v_ts[:n], m_ts[:n]
+        ax.fill_between(x, v, m, color=MGV_C, alpha=FA)
+        ax.plot(x, v, color=VIC_C, lw=0.9, alpha=0.9)
+        ax.plot(x, m, color=MGV_C, lw=0.9, ls='--', alpha=0.85)
+        annotate(ax, v, m)
+    elif v_ts is not None:
+        # VIC only
+        n = min(len(v_ts), 365)
+        ax.plot(DOY[:n], v_ts[:n], color=VIC_C, lw=0.9, alpha=0.9)
+    else:
+        # mGV only
+        n = min(len(m_ts), 365)
+        ax.plot(DOY[:n], m_ts[:n], color=MGV_C, lw=0.9, ls='--', alpha=0.85)
 
 def plot_sm_combined(ax, vds, mds, mask_v, mask_m, xlabels=True):
     style_ax(ax, ylabel="mm", xlabels=xlabels)
@@ -169,10 +179,15 @@ def plot_sm_combined(ax, vds, mds, mask_v, mask_m, xlabels=True):
         v = load_sm(vds, l, is_mgv=False, mask=mask_v)
         m = load_sm(mds, l, is_mgv=True,  mask=mask_m)
         c = SM_COLORS[l]
+        n = 365
         if v is not None and m is not None:
             n = min(len(v), len(m), 365)
             ax.fill_between(DOY[:n], v[:n], m[:n], color=c, alpha=0.08)
+        if v is not None:
+            n = min(len(v), 365)
             ax.plot(DOY[:n], v[:n], color=c, lw=0.9, ls='-',  alpha=0.9)
+        if m is not None:
+            n = min(len(m), 365)
             ax.plot(DOY[:n], m[:n], color=c, lw=0.9, ls='--', alpha=0.85)
         leg.append(Line2D([0],[0], color=c, lw=2, label=f"L{l+1}"))
     leg += [Line2D([0],[0], color='grey', lw=1.4, ls='-',  label='VIC'),
