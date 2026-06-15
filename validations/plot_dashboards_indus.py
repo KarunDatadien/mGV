@@ -13,6 +13,8 @@ import matplotlib.gridspec as gridspec
 from matplotlib.lines import Line2D
 import matplotlib.ticker as ticker
 import warnings
+import os
+import sys
 warnings.filterwarnings("ignore")
 
 VIC_IND = "/home/karun/workspace/mGV/validations/indus_VICrun/results/indus_test.1979-01-01.nc"
@@ -218,6 +220,14 @@ def make_water_fig(title, vds, mds, mask_v, mask_m):
 # =============================================================================
 # INDUS
 # =============================================================================
+
+# Check that input files exist before attempting to plot
+_missing = [p for p in [VIC_IND, MGV_IND] if not os.path.isfile(p)]
+if _missing:
+    for _p in _missing:
+        print(f"WARNING: Input file not found, skipping Indus dashboard: {_p}", file=sys.stderr)
+    sys.exit(0)
+
 print("=== Indus ===")
 vic_ind = nc.Dataset(VIC_IND)
 mgv_ind = nc.Dataset(MGV_IND)

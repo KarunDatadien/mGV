@@ -13,6 +13,8 @@ import matplotlib.gridspec as gridspec
 from matplotlib.lines import Line2D
 import matplotlib.ticker as ticker
 import warnings
+import os
+import sys
 warnings.filterwarnings("ignore")
 
 VIC_MEK = "/home/karun/workspace/mGV/validations/mekong_VICrun/results/mekong_test.1979-01-01.nc"
@@ -218,6 +220,14 @@ def make_water_fig(title, vds, mds, mask_v, mask_m):
 # =============================================================================
 # MEKONG
 # =============================================================================
+
+# Check that input files exist before attempting to plot
+_missing = [p for p in [VIC_MEK, MGV_MEK] if not os.path.isfile(p)]
+if _missing:
+    for _p in _missing:
+        print(f"WARNING: Input file not found, skipping Mekong dashboard: {_p}", file=sys.stderr)
+    sys.exit(0)
+
 print("=== Mekong ===")
 vic_mek = nc.Dataset(VIC_MEK)
 mgv_mek = nc.Dataset(MGV_MEK)
