@@ -17,9 +17,10 @@ import os
 import sys
 warnings.filterwarnings("ignore")
 
-VIC_IND = "/home/karun/workspace/mGV/validations/indus_VICrun/results/indus_test.1979-01-01.nc"
-MGV_IND = "/home/karun/workspace/mGV/output_data/indus/outputfile_indus_1979.nc"
-OUTDIR  = "/home/karun/workspace/mGV/validations"
+HERE    = os.path.dirname(os.path.abspath(__file__))
+VIC_IND = os.path.join(HERE, "indus_VICrun", "results", "indus_test.1979-01-01.nc")
+MGV_IND = os.path.join(HERE, "..", "output_data", "indus", "outputfile_indus_1979.nc")
+OUTDIR  = HERE
 
 VIC_C = "#C0392B"; MGV_C = "#2471A3"; FA = 0.10
 SM_COLORS = ["#1A8A5A", "#E67E22", "#7D3C98"]
