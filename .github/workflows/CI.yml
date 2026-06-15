@@ -48,19 +48,17 @@ jobs:
         run: bash run_validations.sh
 
       # 5. Debug: show what was produced
-      - name: Debug output files
+      - name: Output files
         run: |
-          echo "=== output_data/ ==="
+          echo "output_data/"
           find output_data/ -type f | sort || echo "(empty or missing)"
-          echo "=== validations/*.png ==="
+          echo "validations/*.png"
           find validations/ -name "*.png" | sort || echo "(no PNGs found)"
 
       # 6. GitHub Step Summary table
       - name: Simulation Summary
         run: |
-          echo "## Validation Dashboard Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Basin |   Output   | VIC Reference | Plots |" >> $GITHUB_STEP_SUMMARY
+          echo "| Basin |   Output   | VIC reference | Validation plots produced (see artifact) |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|------------|---------------|-------|" >> $GITHUB_STEP_SUMMARY
 
           for basin in mekong indus; do
