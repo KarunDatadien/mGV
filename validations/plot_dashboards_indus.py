@@ -42,9 +42,16 @@ LEGEND_ELEMS = [
 DOY = np.arange(1, 366)
 
 # ── Data helpers ──────────────────────────────────────────────────────────────
+def open_dataset(path, label):
+    """Open a NetCDF file, returning None with a warning if not found."""
+    if not os.path.isfile(path):
+        print(f"WARNING: {label} file not found, plotting without it: {path}", file=sys.stderr)
+        return None
+    return nc.Dataset(path)
+
 def get_land_mask(ds, ref_var):
     """2-D bool mask: pixels with at least some valid, non-zero data."""
-    if ref_var not in ds.variables:
+    if ds is None or ref_var not in ds.variables:
         return None
     raw = np.ma.filled(ds.variables[ref_var][:], np.nan).astype(float)
     raw[np.abs(raw) > 1e15] = np.nan
@@ -55,7 +62,7 @@ def get_land_mask(ds, ref_var):
     return any_finite & not_all_zero
 
 def load_ts(ds, varname, mask=None, vmax=None):
-    if varname not in ds.variables:
+    if ds is None or varname not in ds.variables:
         return None
     raw = np.ma.filled(ds.variables[varname][:], np.nan).astype(float)
     raw[np.abs(raw) > 1e15] = np.nan
@@ -76,7 +83,7 @@ def load_ts(ds, varname, mask=None, vmax=None):
 
 def load_sm(ds, layer, is_mgv=False, mask=None):
     vn = "soil_moisture_output" if is_mgv else "OUT_SOIL_MOIST"
-    if vn not in ds.variables:
+    if ds is None or vn not in ds.variables:
         return None
     raw = np.ma.filled(ds.variables[vn][:], np.nan).astype(float)
     raw[np.abs(raw) > 1e15] = np.nan
@@ -221,16 +228,14 @@ def make_water_fig(title, vds, mds, mask_v, mask_m):
 # INDUS
 # =============================================================================
 
-# Check that input files exist before attempting to plot
-_missing = [p for p in [VIC_IND, MGV_IND] if not os.path.isfile(p)]
-if _missing:
-    for _p in _missing:
-        print(f"WARNING: Input file not found, skipping Indus dashboard: {_p}", file=sys.stderr)
+# Exit only if BOTH files are missing (no data at all to plot)
+if not os.path.isfile(VIC_IND) and not os.path.isfile(MGV_IND):
+    print("WARNING: Both Indus input files missing, skipping dashboard.", file=sys.stderr)
     sys.exit(0)
 
 print("=== Indus ===")
-vic_ind = nc.Dataset(VIC_IND)
-mgv_ind = nc.Dataset(MGV_IND)
+vic_ind = open_dataset(VIC_IND, "VIC Indus")
+mgv_ind = open_dataset(MGV_IND, "mGV Indus")
 mask_v_ind, mask_m_ind = get_masks(vic_ind, mgv_ind, "OUT_SURF_TEMP", "tsurf_output")
 
 # Energy
@@ -255,5 +260,6 @@ fig = make_water_fig(
     vic_ind, mgv_ind, mask_v_ind, mask_m_ind)
 save(fig, "indus_water.png")
 
-vic_ind.close(); mgv_ind.close()
+if vic_ind is not None: vic_ind.close()
+if mgv_ind is not None: mgv_ind.close()
 
