@@ -1,5 +1,5 @@
 start_year = 1979
-end_year = 1984
+end_year = 1980  # data available up to 1984
 enable_snow = false
 
 [output]
