@@ -17,20 +17,20 @@ jobs:
 
     steps:
       # 1. Check out repo
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # 2. Set up Julia
-      - uses: julia-actions/setup-julia@v2
+      - uses: julia-actions/setup-julia@v3
         with:
           version: '1'
 
-      - uses: julia-actions/cache@v2
+      - uses: julia-actions/cache@v3
 
       - name: Install Julia dependencies
         run: julia --project -e 'using Pkg; Pkg.instantiate()'
 
       # 3. Set up Python & Numpy
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.x'
           cache: 'pip'
