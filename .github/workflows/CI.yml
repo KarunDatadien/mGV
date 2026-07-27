@@ -2,8 +2,9 @@ name: CI tests
 
 on:
   push:
-    branches:
-      - CI
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened]
 
 permissions:
   actions: write
