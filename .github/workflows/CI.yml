@@ -1,0 +1,99 @@
+name: CI tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  test:
+    name: Run validation script
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Check out repo
+      - uses: actions/checkout@v7
+
+      # 2. Set up Julia
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: '1'
+
+      - uses: julia-actions/cache@v3
+
+      - name: Install Julia dependencies
+        run: julia --project -e 'using Pkg; Pkg.instantiate()'
+
+      # 3. Set up Python & Numpy
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.x'
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Show file paths
+        run: |
+          pwd
+          ls -la
+          ls -la input_data/mekong/
+
+      # 4. Execute the script
+      - name: Run validations
+        run: bash run_validations.sh
+
+      # 5. Debug: show what was produced
+      - name: Output files
+        run: |
+          echo "output_data/"
+          find output_data/ -type f | sort || echo "(empty or missing)"
+          echo "validations/*.png"
+          find validations/ -name "*.png" | sort || echo "(no PNGs found)"
+
+      # 6. GitHub Step Summary table
+      - name: Simulation Summary
+        run: |
+          echo "| Basin |   Output   | VIC reference | Validation plots produced (see artifact) |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|------------|---------------|-------|" >> $GITHUB_STEP_SUMMARY
+
+          for basin in mekong indus; do
+            # Check output
+            sim_file=$(find output_data/${basin}/ -name "*.nc" 2>/dev/null | head -1)
+            if [ -n "$sim_file" ]; then
+              sim_status="✅ Found"
+            else
+              sim_status="❌ Missing"
+            fi
+
+            # Check VIC reference
+            vic_file=$(find validations/${basin}_VICrun/ -name "*.nc" 2>/dev/null | head -1)
+            if [ -n "$vic_file" ]; then
+              vic_status="✅ Available"
+            else
+              vic_status="⚠️ Not available"
+            fi
+
+            # Check plots
+            plots=$(find validations/ -name "${basin}_*.png" 2>/dev/null | xargs -I{} basename {} | tr '\n' ' ')
+            if [ -n "$plots" ]; then
+              plot_status="\`${plots}\`"
+            else
+              plot_status="—"
+            fi
+
+            basin_label="$(tr '[:lower:]' '[:upper:]' <<< ${basin:0:1})${basin:1}"
+            echo "| **${basin_label}** | ${sim_status} | ${vic_status} | ${plot_status} |" >> $GITHUB_STEP_SUMMARY
+          done
+
+      # 7. Upload the generated plots
+      - name: Upload plot artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: validation-dashboards
+          path: validations/*.png

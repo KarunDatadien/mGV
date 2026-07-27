@@ -1,5 +1,4 @@
-julia --project=. run.jl mekong 1979 1980
-julia --project=. run.jl indus 1979 1980
+julia --project=. run.jl configs/mekong_config.toml --nc
+#julia --project=. run.jl configs/indus_config.toml --nc
 
-cd ./validations
-python plot_dashboards_mekong_indus.py
+python3 validations/plot_dashboard.py mekong

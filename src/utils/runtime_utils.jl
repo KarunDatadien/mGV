@@ -1,9 +1,27 @@
+const USAGE = "Usage: julia run.jl <config_file> [--nc|--netcdf|--output=nc]"
+
+function get_output_format()
+    for arg in ARGS
+        if startswith(arg, "--output=")
+            val = split(arg, "=")[2]
+            if val in ["netcdf", "nc"]
+                return :netcdf
+            end
+        elseif arg in ["--netcdf", "--nc"]
+            return :netcdf
+        end
+    end
+    return :zarr
+end
+
 function parse_args()
     # Notify the user if defaulting to "global"
-    if length(ARGS) != 1
-        error("run script requires a single argument, the path to the config file.")
+    if length(ARGS) < 1
+        error("run script requires the path to the config file as first argument.")
     end
-    
+    if length(ARGS) > 2
+        error("run script requires a config file, and an optional extra argument (output format).")
+    end
     config_file = ARGS[1]
 
     if !isabspath(config_file)
@@ -11,7 +29,7 @@ function parse_args()
     end
 
     if !isfile(config_file)
-        error("Provided config file '$config_file' does not exist, or is not reachable from this path!")
+        error("Config file '$config_file' does not exist or is not reachable from this path!")
     end
 
     return config_file
@@ -40,7 +58,7 @@ function has_input_files(year)
     for prefix in input_prefixes
         file_path = "$(prefix)$(year).nc"
         if !isfile(file_path)
-            println("⚠️ WARNING: Input file for year $year not found: $file_path")
+            println("WARNING: Input file for year $year not found: $file_path")
             return false
         end
     end

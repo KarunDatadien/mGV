@@ -4,22 +4,23 @@
 White background, no precipitation, no air temp, no snow physics.
 Surface temperature uses proper per-dataset land masks.
 """
+import argparse
+from pathlib import Path
+
 import numpy as np
 import netCDF4 as nc
 import matplotlib
-matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from matplotlib.lines import Line2D
 import matplotlib.ticker as ticker
 import warnings
-warnings.filterwarnings("ignore")
+import os
+import sys
 
-VIC_MEK = "/home/karun/workspace/mGV/validations/mekong_VICrun/results/mekong_test.1979-01-01.nc"
-MGV_MEK = "/home/karun/workspace/mGV/output_data/mekong/outputfile_mekong_1979.nc"
-VIC_IND = "/home/karun/workspace/mGV/validations/indus_VICrun/results/indus_test.1979-01-01.nc"
-MGV_IND = "/home/karun/workspace/mGV/output_data/indus/outputfile_indus_1979.nc"
-OUTDIR  = "/home/karun/workspace/mGV/validations"
+
+warnings.filterwarnings("ignore")
+matplotlib.use('Agg')
 
 VIC_C = "#C0392B"; MGV_C = "#2471A3"; FA = 0.10
 SM_COLORS = ["#1A8A5A", "#E67E22", "#7D3C98"]
@@ -41,10 +42,26 @@ LEGEND_ELEMS = [
 ]
 DOY = np.arange(1, 366)
 
+# ET variable spec (reused for both basins)
+ET_VARS = [
+    ("OUT_EVAP",       "total_et_output",                    "Total ET",           "mm d$^{-1}$"),
+    ("OUT_TRANSP_VEG", "transpiration_summed_output",        "Transpiration",       "mm d$^{-1}$"),
+    ("OUT_EVAP_CANOP", "canopy_evaporation_summed_output",   "Canopy Evaporation",  "mm d$^{-1}$"),
+    ("OUT_EVAP_BARE",  "soil_evaporation_output",            "Soil Evaporation",    "mm d$^{-1}$"),
+    ("OUT_PET",        "potential_evaporation_summed_output","Potential ET",         "mm d$^{-1}$"),
+]
+
 # ── Data helpers ──────────────────────────────────────────────────────────────
+def open_dataset(path, label):
+    """Open a NetCDF file, returning None with a warning if not found."""
+    if not os.path.isfile(path):
+        print(f"WARNING: {label} file not found, plotting without it: {path}", file=sys.stderr)
+        return None
+    return nc.Dataset(path)
+
 def get_land_mask(ds, ref_var):
     """2-D bool mask: pixels with at least some valid, non-zero data."""
-    if ref_var not in ds.variables:
+    if ds is None or ref_var not in ds.variables:
         return None
     raw = np.ma.filled(ds.variables[ref_var][:], np.nan).astype(float)
     raw[np.abs(raw) > 1e15] = np.nan
@@ -55,7 +72,7 @@ def get_land_mask(ds, ref_var):
     return any_finite & not_all_zero
 
 def load_ts(ds, varname, mask=None, vmax=None):
-    if varname not in ds.variables:
+    if ds is None or varname not in ds.variables:
         return None
     raw = np.ma.filled(ds.variables[varname][:], np.nan).astype(float)
     raw[np.abs(raw) > 1e15] = np.nan
@@ -76,7 +93,7 @@ def load_ts(ds, varname, mask=None, vmax=None):
 
 def load_sm(ds, layer, is_mgv=False, mask=None):
     vn = "soil_moisture_output" if is_mgv else "OUT_SOIL_MOIST"
-    if vn not in ds.variables:
+    if ds is None or vn not in ds.variables:
         return None
     raw = np.ma.filled(ds.variables[vn][:], np.nan).astype(float)
     raw[np.abs(raw) > 1e15] = np.nan
@@ -142,16 +159,26 @@ def annotate(ax, v, m):
 def plot_var(ax, v_ts, m_ts, title, unit, xlabels=True):
     style_ax(ax, ylabel=unit, xlabels=xlabels)
     ax.set_title(title)
-    if v_ts is None or m_ts is None:
+    if v_ts is None and m_ts is None:
         ax.text(0.5, 0.5, "variable not found", transform=ax.transAxes,
                 ha='center', va='center', fontsize=9, color="#888888")
         return
-    n = min(len(v_ts), len(m_ts), 365)
-    x, v, m = DOY[:n], v_ts[:n], m_ts[:n]
-    ax.fill_between(x, v, m, color=MGV_C, alpha=FA)
-    ax.plot(x, v, color=VIC_C, lw=0.9, alpha=0.9)
-    ax.plot(x, m, color=MGV_C, lw=0.9, ls='--', alpha=0.85)
-    annotate(ax, v, m)
+    if v_ts is not None and m_ts is not None:
+        # Full comparison: both datasets available
+        n = min(len(v_ts), len(m_ts), 365)
+        x, v, m = DOY[:n], v_ts[:n], m_ts[:n]
+        ax.fill_between(x, v, m, color=MGV_C, alpha=FA)
+        ax.plot(x, v, color=VIC_C, lw=0.9, alpha=0.9)
+        ax.plot(x, m, color=MGV_C, lw=0.9, ls='--', alpha=0.85)
+        annotate(ax, v, m)
+    elif v_ts is not None:
+        # VIC only
+        n = min(len(v_ts), 365)
+        ax.plot(DOY[:n], v_ts[:n], color=VIC_C, lw=0.9, alpha=0.9)
+    else:
+        # mGV only
+        n = min(len(m_ts), 365)
+        ax.plot(DOY[:n], m_ts[:n], color=MGV_C, lw=0.9, ls='--', alpha=0.85)
 
 def plot_sm_combined(ax, vds, mds, mask_v, mask_m, xlabels=True):
     style_ax(ax, ylabel="mm", xlabels=xlabels)
@@ -161,30 +188,25 @@ def plot_sm_combined(ax, vds, mds, mask_v, mask_m, xlabels=True):
         v = load_sm(vds, l, is_mgv=False, mask=mask_v)
         m = load_sm(mds, l, is_mgv=True,  mask=mask_m)
         c = SM_COLORS[l]
+        n = 365
         if v is not None and m is not None:
             n = min(len(v), len(m), 365)
             ax.fill_between(DOY[:n], v[:n], m[:n], color=c, alpha=0.08)
+        if v is not None:
+            n = min(len(v), 365)
             ax.plot(DOY[:n], v[:n], color=c, lw=0.9, ls='-',  alpha=0.9)
+        if m is not None:
+            n = min(len(m), 365)
             ax.plot(DOY[:n], m[:n], color=c, lw=0.9, ls='--', alpha=0.85)
         leg.append(Line2D([0],[0], color=c, lw=2, label=f"L{l+1}"))
     leg += [Line2D([0],[0], color='grey', lw=1.4, ls='-',  label='VIC'),
             Line2D([0],[0], color='grey', lw=1.4, ls='--', label='VIC-WUR-Julia')]
     ax.legend(handles=leg, fontsize=7.5, loc='upper right', ncol=2, framealpha=0.95)
 
-def save(fig, name):
-    path = f"{OUTDIR}/{name}"
+def save(fig, path):
     fig.savefig(path, dpi=300, bbox_inches='tight', facecolor='white')
     print(f"Saved: {path}")
     plt.close(fig)
-
-# ET variable spec (reused for both basins)
-ET_VARS = [
-    ("OUT_EVAP",       "total_et_output",                    "Total ET",           "mm d$^{-1}$"),
-    ("OUT_TRANSP_VEG", "transpiration_summed_output",        "Transpiration",       "mm d$^{-1}$"),
-    ("OUT_EVAP_CANOP", "canopy_evaporation_summed_output",   "Canopy Evaporation",  "mm d$^{-1}$"),
-    ("OUT_EVAP_BARE",  "soil_evaporation_output",            "Soil Evaporation",    "mm d$^{-1}$"),
-    ("OUT_PET",        "potential_evaporation_summed_output","Potential ET",         "mm d$^{-1}$"),
-]
 
 def make_water_fig(title, vds, mds, mask_v, mask_m):
     """Create a 2-row water balance figure with 5 ET panels + 3 hydro/SM panels."""
@@ -217,67 +239,61 @@ def make_water_fig(title, vds, mds, mask_v, mask_m):
     plot_sm_combined(ax_hy[2], vds, mds, mask_v, mask_m)
     return fig
 
-# =============================================================================
-# INDUS
-# =============================================================================
-print("=== Indus ===")
-vic_ind = nc.Dataset(VIC_IND)
-mgv_ind = nc.Dataset(MGV_IND)
-mask_v_ind, mask_m_ind = get_masks(vic_ind, mgv_ind, "OUT_SURF_TEMP", "tsurf_output")
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        'case',
+        help="Generate validation plots for example case. Must be either 'Mekong' or 'Indus'",
+        type=str
+    )
+    args = parser.parse_args()
+    case = str(args.case).capitalize()
 
-# Energy
-fig, axes = plt.subplots(1, 2, figsize=(12, 4.5))
-fig.suptitle("Indus Basin — Energy Balance  |  VIC vs VIC-WUR-Julia  |  1979",
-             fontsize=14, fontweight='bold')
-plt.subplots_adjust(wspace=0.35, left=0.08, right=0.97, top=0.88, bottom=0.13)
-plot_var(axes[0],
-         load_ts(vic_ind, "OUT_R_NET",    mask=mask_v_ind),
-         load_ts(mgv_ind, "net_radiation_summed_output", mask=mask_m_ind),
-         "Net Radiation", "W m$^{-2}$")
-plot_var(axes[1],
-         load_ts(vic_ind, "OUT_SURF_TEMP", mask=mask_v_ind),
-         load_ts(mgv_ind, "tsurf_output",  mask=mask_m_ind),
-         "Surface Temperature", "°C")
-axes[0].legend(handles=LEGEND_ELEMS, fontsize=9)
-save(fig, "indus_energy.png")
+    if case not in ["Indus", "Mekong"]:
+        msg = "Invalid validation case."
+        raise ValueError(msg)
 
-# Water
-fig = make_water_fig(
-    "Indus Basin — Water Balance & ET  |  VIC vs VIC-WUR-Julia  |  1979",
-    vic_ind, mgv_ind, mask_v_ind, mask_m_ind)
-save(fig, "indus_water.png")
+    outdir = Path(__file__).parent.resolve()
 
-vic_ind.close(); mgv_ind.close()
+    if case == "Mekong":
+        vic_file = outdir / "mekong_VICrun" / "results" / "mekong_test.1979-01-01.nc"
+        mgv_file = outdir / ".." / "output_data" / "mekong" / "outputfile_mekong_1979.nc"
+    elif case == "Indus":
+        vic_file = outdir / "indus_VICrun" / "results" / "indus_test.1979-01-01.nc"
+        mgv_file = outdir / ".." / "output_data" / "indus" / "outputfile_indus_1979.nc"
 
-# =============================================================================
-# MEKONG
-# =============================================================================
-print("=== Mekong ===")
-vic_mek = nc.Dataset(VIC_MEK)
-mgv_mek = nc.Dataset(MGV_MEK)
-mask_v_mek, mask_m_mek = get_masks(vic_mek, mgv_mek, "OUT_SURF_TEMP", "tsurf_output")
+    # Exit only if BOTH files are missing (no data at all to plot)
+    if not vic_file.exists() and not mgv_file.exists():
+        print("WARNING: Both input files missing, skipping dashboard.", file=sys.stderr)
+        sys.exit(0)
 
-# Energy
-fig, axes = plt.subplots(1, 2, figsize=(12, 4.5))
-fig.suptitle("Mekong Basin — Energy Balance  |  VIC vs VIC-WUR-Julia  |  1979",
-             fontsize=14, fontweight='bold')
-plt.subplots_adjust(wspace=0.35, left=0.08, right=0.97, top=0.88, bottom=0.13)
-plot_var(axes[0],
-         load_ts(vic_mek, "OUT_R_NET",    mask=mask_v_mek),
-         load_ts(mgv_mek, "net_radiation_summed_output", mask=mask_m_mek),
-         "Net Radiation", "W m$^{-2}$")
-plot_var(axes[1],
-         load_ts(vic_mek, "OUT_SURF_TEMP", mask=mask_v_mek),
-         load_ts(mgv_mek, "tsurf_output",  mask=mask_m_mek),
-         "Surface Temperature", "°C")
-axes[0].legend(handles=LEGEND_ELEMS, fontsize=9)
-save(fig, "mekong_energy.png")
+    print(f"=== {case} ===")
+    vic_mek = open_dataset(vic_file, f"VIC {case}")
+    mgv_mek = open_dataset(mgv_file, f"mGV {case}")
+    mask_v_mek, mask_m_mek = get_masks(vic_mek, mgv_mek, "OUT_SURF_TEMP", "tsurf_output")
 
-# Water
-fig = make_water_fig(
-    "Mekong Basin — Water Balance & ET  |  VIC vs VIC-WUR-Julia  |  1979",
-    vic_mek, mgv_mek, mask_v_mek, mask_m_mek)
-save(fig, "mekong_water.png")
+    # Energy
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.5))
+    fig.suptitle(f"{case} Basin — Energy Balance |  VIC vs VIC-WUR-Julia  |  1979",
+                fontsize=14, fontweight='bold')
+    plt.subplots_adjust(wspace=0.35, left=0.08, right=0.97, top=0.88, bottom=0.13)
+    plot_var(axes[0],
+            load_ts(vic_mek, "OUT_R_NET",    mask=mask_v_mek),
+            load_ts(mgv_mek, "net_radiation_summed_output", mask=mask_m_mek),
+            "Net Radiation", "W m$^{-2}$")
+    plot_var(axes[1],
+            load_ts(vic_mek, "OUT_SURF_TEMP", mask=mask_v_mek),
+            load_ts(mgv_mek, "tsurf_output",  mask=mask_m_mek),
+            "Surface Temperature", "°C")
+    axes[0].legend(handles=LEGEND_ELEMS, fontsize=9)
+    save(fig, f"{outdir}/{case.lower()}_energy.png")
 
-vic_mek.close(); mgv_mek.close()
-print("All done.")
+    # Water
+    fig = make_water_fig(
+        f"{case} Basin — Water Balance & ET  |  VIC vs VIC-WUR-Julia  |  1979",
+        vic_mek, mgv_mek, mask_v_mek, mask_m_mek)
+    save(fig, f"{outdir}/{case.lower()}_water.png")
+
+    if vic_mek is not None: vic_mek.close()
+    if mgv_mek is not None: mgv_mek.close()
+    print("All done.")
