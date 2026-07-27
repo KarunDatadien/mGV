@@ -203,8 +203,7 @@ def plot_sm_combined(ax, vds, mds, mask_v, mask_m, xlabels=True):
             Line2D([0],[0], color='grey', lw=1.4, ls='--', label='VIC-WUR-Julia')]
     ax.legend(handles=leg, fontsize=7.5, loc='upper right', ncol=2, framealpha=0.95)
 
-def save(fig, name):
-    path = f"{OUTDIR}/{name}"
+def save(fig, path):
     fig.savefig(path, dpi=300, bbox_inches='tight', facecolor='white')
     print(f"Saved: {path}")
     plt.close(fig)
@@ -287,13 +286,13 @@ if __name__ == "__main__":
             load_ts(mgv_mek, "tsurf_output",  mask=mask_m_mek),
             "Surface Temperature", "°C")
     axes[0].legend(handles=LEGEND_ELEMS, fontsize=9)
-    save(fig, f"{case.lower()}_energy.png")
+    save(fig, f"{outdir}/{case.lower()}_energy.png")
 
     # Water
     fig = make_water_fig(
         f"{case} Basin — Water Balance & ET  |  VIC vs VIC-WUR-Julia  |  1979",
         vic_mek, mgv_mek, mask_v_mek, mask_m_mek)
-    save(fig, f"{case.lower()}_water.png")
+    save(fig, f"{outdir}/{case.lower()}_water.png")
 
     if vic_mek is not None: vic_mek.close()
     if mgv_mek is not None: mgv_mek.close()
