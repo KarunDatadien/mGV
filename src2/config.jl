@@ -10,19 +10,20 @@ using TOML
     input_param_file::String
     coverage_file::String
     routing_param_file::String
-    input_prec_prefix::String
-    input_tair_prefix::String
-    input_wind_prefix::String
-    input_vp_prefix::String
-    input_swdown_prefix::String
-    input_lwdown_prefix::String
-    input_psurf_prefix::String
+    precipitation_file::String
+    air_temperature_file::String
+    wind_speed_file::String
+    vapor_pressure_file::String
+    shortwave_down_file::String
+    longwave_down_file::String
+    surface_pressure_file::String
 end
 
 @option "names" struct InputNames
     # Grid Parameters
     latitude::String = "lat"
     longitude::String = "lon"
+    time::String = "time"
     elevation::String = "elev"
     average_temperature::String = "avg_T"
     annual_precipitation::String = "annual_prec"
@@ -64,13 +65,13 @@ end
     baseflow_curve_exp::String = "c"
 
     # Forcing
-    prec::String = "prec"
-    tair::String = "tair"
-    wind::String = "wind" 
-    vp::String = "vp"
-    swdown::String = "swdown"
-    lwdown::String = "lwdown"
-    psurf::String = "psurf"
+    precipitation::String = "prec"
+    air_temperature::String = "tair"
+    wind_speed::String = "wind" 
+    vapor_pressure::String = "vp"
+    shortwave_down::String = "swdown"
+    longwave_down::String = "lwdown"
+    surface_pressure::String = "psurf"
 end
 
 @option "input" struct InputCfg
@@ -92,10 +93,10 @@ end
     fillvalue_threshold::Float32 = 1f15
     start_year::Int
     end_year::Int
+    timestep::Int = 86400  # seconds
     input::InputCfg
     output::OutputCfg
 end
-
 
 """Validate the path of a file relative to the given directory."""
 function validate_path(file, dir)

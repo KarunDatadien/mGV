@@ -53,3 +53,66 @@ end
 
 @adapt_structure SoilVariables
 
+;SVP_A, SVP_B, SVP_C, PA_PER_KPA, R_AIR, T_FREEZE, LAPSE_RATE = PhysConsts
+
+"""
+    calculate_svp(air_temperature)
+
+Compute the saturation vapor pressure (kPa?) based on the air
+temperature (°C).
+"""
+@inline function calculate_svp(air_temperature)
+    # 1. Tetens Equation (standard over water)
+    svp = SVP_A * exp((SVP_B * air_temperature) / (SVP_C + air_temperature))
+
+    # 2. Sub-zero correction (Murray 1967 / standard VIC logic)
+    # Lower saturation vapor pressure over ice compared to water
+    if air_temperature < 0.0f0
+        svp = svp * (1.0f0 + 0.00972f0 * air_temperature + 0.000042f0 * air_temperature^2)
+    end
+    return svp
+end
+
+"""
+    calculate_vpd(air_temperature, vapor_pressure)
+
+Compute the vapor pressure deficit (Pa?) based on the air temperature (°C)
+and actual vapor pressure (kPa?).
+"""
+function calculate_vpd(air_temperature, vapor_pressure)
+    return max(
+        svp(air_temperature) - vapor_pressure,
+        0.0f0
+    ) * PA_PER_KPA # [Pa]
+end
+
+"""
+Compute the slope of the saturation vapor pressure curve.
+"""
+@inline function calculate_svp_slope(air_temperature)
+    # Re-calculate SVP part locally (scalar)
+    svp_part = SVP_A * exp((SVP_B * air_temperature) / (SVP_C + air_temperature))
+    
+    # Calculate Slope
+    slope_kpa = (SVP_B * SVP_C * svp_part) / ((SVP_C + air_temperature)^2)
+    
+    return slope_kpa * PA_PER_KPA # [Pa/°C]
+end
+
+"""
+Compute the atmospheric scale height [m] with lapse rate correction
+"""
+@inline function calculate_scale_height(air_temperature, elevation)
+    scale_height = (R_AIR / G) * (
+        (air_temperature + T_FREEZE) + 0.5f0 * elevation * LAPSE_RATE
+    )
+    return scale_height
+end
+
+"""
+Compute the latent heat of vaporization (J/kg)
+"""
+@inline function calculate_latent_heat(air_temperature_kelvin)
+    tc = air_temperature_kelvin - T_FREEZE
+    return 2.501f6 - 2361.0f0 * tc # [K/kg]
+end
