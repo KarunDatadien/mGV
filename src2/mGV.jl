@@ -11,7 +11,6 @@ using MacroTools
 using Printf
 using Statistics
 using Adapt: adapt, @adapt_structure
-using Dates: Second
 
 include("config.jl")
 using .Config: load_config, Cfg
@@ -20,11 +19,11 @@ include("constants.jl")
 using .Constants: PhysConsts, SimConsts, SnowConsts
 
 include("reader.jl")
-include("physics.jl")
 include("parameters.jl")
+include("physics.jl")
+include("snow.jl")
+include("energy_balance.jl")
 
-config_file = "/home/bart/git/mGV/configs/mekong_config.toml"
-cfg = load_config(config_file)
 
 """Validate the path of a file relative to the given directory."""
 function validate_path(file, dir)
@@ -52,6 +51,20 @@ mutable struct Clock{T}
     dt::Second
 end
 
+"""
+Advance clock one step in time.
+
+Note: at iteration 0 the clock is not advanced in time,
+to have the model start time at iteration 1.
+"""
+function advance!(clock)
+    if clock.iteration != 0
+        clock.time += clock.dt
+    end
+    clock.iteration += 1
+    return nothing
+end
+
 """Initialize clock based on config"""
 function Clock(config::Cfg)
     return Clock(
@@ -62,6 +75,12 @@ function Clock(config::Cfg)
 end
 
 
+"""
+mGV model state.
+
+The model state includes all information the model's update functions
+require.
+"""
 @kwdef struct Model
     config::Cfg    # all configuration options
     clock::Clock   # to keep track of simulation time
@@ -71,17 +90,18 @@ end
     surface_energy_variables::SurfaceEnergyVariables
     canopy_variables::CanopyVariables
     soil_variables::SoilVariables
+    snow_variables::SnowVariables
     forcing_variables::ForcingVariables
     forcing_readers::ForcingReaders
     # routing::R                      # routing model (horizontal fluxes), moves along network
     # writer::W                       # writes model output
 end
 
+
 function Model(config::Cfg)
     clock = Clock(config)
     forcing_readers, forcing_variables = initialize_forcing(config)
-    grid_parameters, vegetation_parameters, soil_parameters = 
-        read_parameters(config)
+    grid_parameters, vegetation_parameters, soil_parameters = read_parameters(config)
 
     # Check dim order!
     nx = length(grid_parameters.longitude)
@@ -93,9 +113,10 @@ function Model(config::Cfg)
     tile_dims = (nx, ny, nbands, nveg)
     soil_dims = (nx, ny, nlayers)
 
-    surface_energy_variables = SurfaceEnergyVariables(grid_dims)
+    surface_energy_variables = SurfaceEnergyVariables(grid_dims, tile_dims)
     canopy_variables = CanopyVariables(tile_dims)
     soil_variables = SoilVariables(soil_dims)
+    snow_variables = SnowVariables(nx, ny, nbands, nveg)
 
     # Move data to backend during model initialization
     if backend_name != "CPU"
@@ -105,6 +126,7 @@ function Model(config::Cfg)
         surface_energy_variables = adapt(ArrayType, surface_energy_variables)
         canopy_variables = adapt(ArrayType, canopy_variables)
         soil_variables = adapt(ArrayType, soil_variables)
+        snow_variables = adapt(ArrayType, snow_variables)
         forcing_variables = adapt(ArrayType, forcing_variables)
     end
 
@@ -118,15 +140,39 @@ function Model(config::Cfg)
         surface_energy_variables,
         canopy_variables,
         soil_variables,
+        snow_variables,
         forcing_variables,
         forcing_readers,
     )
 end
 
+config_file = "/home/bart/git/mGV/configs/mekong_config.toml"
+cfg = load_config(config_file)
+
 m = Model(cfg)
 
 function update!(model::Model)
-    0.0
+    advance!(model.clock)
+    update_forcing!(model.clock.time, model.forcing_readers, model.forcing_variables)
+    current_month = month(model.clock.time)
+
+    # Initialize surface temperature on first timestep
+    if model.clock.iteration == 1
+        model.surface_energy_variables.surface_temperature .= 
+        model.forcing_variables.air_temperature
+    end
+
+    calculate_band_forcings!(
+        model.grid_parameters, model.forcing_variables, model.snow_variables
+    )
+
+    calculate_net_radiation!(
+        model.forcing_variables,
+        model.surface_energy_variables,
+        @view model.vegetation_parameters.albedo[:,:,[current_month],:]
+    )
+
+    return nothing
 end
 
-end
+end # module end

@@ -1,6 +1,6 @@
-struct SurfaceEnergyVariables{T <: AbstractMatrix}
+struct SurfaceEnergyVariables{M <: AbstractMatrix, T <: AbstractArray}
     # State
-    surface_temperature::T
+    surface_temperature::M
 
     # Fluxes
     net_radiation::T
@@ -14,14 +14,14 @@ end
 
 @adapt_structure SurfaceEnergyVariables
 
-function SurfaceEnergyVariables(dims)
+function SurfaceEnergyVariables(grid_dims, tile_dims)
     return SurfaceEnergyVariables(
-        zeros(Float32, dims),
-        zeros(Float32, dims),
-        zeros(Float32, dims),
-        zeros(Float32, dims),
-        zeros(Float32, dims),
-        zeros(Float32, dims)
+        zeros(Float32, grid_dims),
+        zeros(Float32, tile_dims),
+        zeros(Float32, tile_dims),
+        zeros(Float32, tile_dims),
+        zeros(Float32, tile_dims),
+        zeros(Float32, tile_dims)
     )
 end
 

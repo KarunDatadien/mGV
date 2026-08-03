@@ -29,7 +29,7 @@ using Parameters
     # Energy and Radiation Constants
     LAT_VAP::Float32 = 2.501e6     # Latent heat of vaporization (J/kg)
     G::Float32 = 9.81              # Gravitational acceleration (m/s²)
-    SIGMA::Float32 = 5.67e8       # Stefan-Boltzmann constant (W/m²K⁴)
+    SIGMA::Float32 = 5.67e-8       # Stefan-Boltzmann constant (W/m²K⁴)
 
     # Atmospheric Constants
     P_STD::Float32 = 101325.0    # Standard pressure (Pa)
