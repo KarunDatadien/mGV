@@ -15,13 +15,13 @@ using Dates: Second
 
 include("config.jl")
 using .Config: load_config, Cfg
+include("backend_setup.jl")
 include("constants.jl")
 using .Constants: PhysConsts, SimConsts, SnowConsts
 
 include("reader.jl")
 include("physics.jl")
 include("parameters.jl")
-
 
 config_file = "/home/bart/git/mGV/configs/mekong_config.toml"
 cfg = load_config(config_file)
@@ -41,8 +41,6 @@ function validate_path(file, dir)
     return file
 end
 
-vars = open_forcing(cfg)
-
 """
 Clock struct for timekeeping.
 
@@ -54,13 +52,22 @@ mutable struct Clock{T}
     dt::Second
 end
 
+"""Initialize clock based on config"""
+function Clock(config::Cfg)
+    return Clock(
+        DateTime(config.start_year),
+        0,
+        Second(config.timestep)
+    )
+end
 
-struct Model{T}
+
+@kwdef struct Model
     config::Cfg    # all configuration options
     clock::Clock   # to keep track of simulation time
     grid_parameters::GridParameters
     vegetation_parameters::VegetationParameters
-    snow_parameters::SoilParameters
+    soil_parameters::SoilParameters
     surface_energy_variables::SurfaceEnergyVariables
     canopy_variables::CanopyVariables
     soil_variables::SoilVariables
@@ -70,28 +77,56 @@ struct Model{T}
     # writer::W                       # writes model output
 end
 
-f = initialize_forcing(cfg)
+function Model(config::Cfg)
+    clock = Clock(config)
+    forcing_readers, forcing_variables = initialize_forcing(config)
+    grid_parameters, vegetation_parameters, soil_parameters = 
+        read_parameters(config)
 
-# function Model(config::Cfg)
-#     return Model(
-#         ;
-#         config,
-#         grid_parameters,
-#         vegetation_parameters,
-#         snow_parameters
-#         surface_energy_variables,
-#         soil_variables
-#     )
-# end
+    # Check dim order!
+    nx = length(grid_parameters.longitude)
+    ny = length(grid_parameters.latitude)
+    nveg = cfg.nveg  # vegetation types
+    nbands = cfg.nbands  # snow bands
+    nlayers = size(soil_parameters.depth, 3) # derive soil layers from input data
+    grid_dims = (nx, ny)
+    tile_dims = (nx, ny, nbands, nveg)
+    soil_dims = (nx, ny, nlayers)
 
-# function initialize(::Type{Model}, config_file::AbstractString)
-#     config = load_config(config_file)
-#     model = Model(config)
-#     return model
-# end
+    surface_energy_variables = SurfaceEnergyVariables(grid_dims)
+    canopy_variables = CanopyVariables(tile_dims)
+    soil_variables = SoilVariables(soil_dims)
 
-# function update!(model::Model)
-#     # ...
-# end
+    # Move data to backend during model initialization
+    if backend_name != "CPU"
+        grid_parameters = adapt(ArrayType, grid_parameters)
+        vegetation_parameters = adapt(ArrayType, vegetation_parameters)
+        soil_parameters = adapt(ArrayType, soil_parameters)
+        surface_energy_variables = adapt(ArrayType, surface_energy_variables)
+        canopy_variables = adapt(ArrayType, canopy_variables)
+        soil_variables = adapt(ArrayType, soil_variables)
+        forcing_variables = adapt(ArrayType, forcing_variables)
+    end
+
+    return Model(
+        ;
+        config,
+        clock,
+        grid_parameters,
+        vegetation_parameters,
+        soil_parameters,
+        surface_energy_variables,
+        canopy_variables,
+        soil_variables,
+        forcing_variables,
+        forcing_readers,
+    )
+end
+
+m = Model(cfg)
+
+function update!(model::Model)
+    0.0
+end
 
 end

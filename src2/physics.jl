@@ -1,4 +1,4 @@
-struct SurfaceEnergyVariables{T <: AbstractArray}
+struct SurfaceEnergyVariables{T <: AbstractMatrix}
     # State
     surface_temperature::T
 
@@ -13,6 +13,17 @@ struct SurfaceEnergyVariables{T <: AbstractArray}
 end
 
 @adapt_structure SurfaceEnergyVariables
+
+function SurfaceEnergyVariables(dims)
+    return SurfaceEnergyVariables(
+        zeros(Float32, dims),
+        zeros(Float32, dims),
+        zeros(Float32, dims),
+        zeros(Float32, dims),
+        zeros(Float32, dims),
+        zeros(Float32, dims)
+    )
+end
 
 struct CanopyVariables{T <: AbstractArray}
     # State
@@ -30,6 +41,19 @@ struct CanopyVariables{T <: AbstractArray}
 end
 
 @adapt_structure CanopyVariables
+
+function CanopyVariables(dims)
+    return CanopyVariables(
+        zeros(Float32, dims),
+        zeros(Float32, dims),
+        zeros(Float32, dims),
+        zeros(Float32, dims),
+        zeros(Float32, dims),
+        zeros(Float32, dims),
+        zeros(Float32, dims)
+    )
+end
+
 
 struct SoilVariables{T <: AbstractArray}
     # State
@@ -52,6 +76,23 @@ struct SoilVariables{T <: AbstractArray}
 end
 
 @adapt_structure SoilVariables
+
+function SoilVariables(dims)
+    return SoilVariables(
+        zeros(Float32, dims),
+        zeros(Float32, dims),
+        zeros(Float32, dims),
+        zeros(Float32, dims),
+        zeros(Float32, dims),
+        zeros(Float32, dims),
+        zeros(Float32, dims),
+        zeros(Float32, dims),
+        zeros(Float32, dims),
+        zeros(Float32, dims),
+        zeros(Float32, dims),
+        zeros(Float32, dims)
+    )
+end
 
 ;SVP_A, SVP_B, SVP_C, PA_PER_KPA, R_AIR, T_FREEZE, LAPSE_RATE = PhysConsts
 
