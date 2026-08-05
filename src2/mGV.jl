@@ -10,6 +10,7 @@ using TimerOutputs
 using MacroTools
 using Printf
 using Statistics
+using KernelAbstractions
 using Adapt: adapt, @adapt_structure
 
 include("config.jl")
@@ -146,11 +147,6 @@ function Model(config::Cfg)
     )
 end
 
-config_file = "/home/bart/git/mGV/configs/mekong_config.toml"
-cfg = load_config(config_file)
-
-m = Model(cfg)
-
 function update!(model::Model)
     advance!(model.clock)
     update_forcing!(model.clock.time, model.forcing_readers, model.forcing_variables)
@@ -162,17 +158,46 @@ function update!(model::Model)
         model.forcing_variables.air_temperature
     end
 
+    # Energy balance and atmospheric calculations
+    #--------------------------------------------
+
     calculate_band_forcings!(
         model.grid_parameters, model.forcing_variables, model.snow_variables
     )
 
+    calculate_aerodynamic_resistance!(
+        model.forcing_variables,
+        model.surface_energy_variables,
+        model.soil_parameters,
+        @view(model.vegetation_parameters.displacement_height[:,:,[current_month],:]),
+        @view(model.vegetation_parameters.roughness_length[:,:,[current_month],:])
+    )
+
+    # Step 1: compute WITHOUT snow for PE
     calculate_net_radiation!(
         model.forcing_variables,
         model.surface_energy_variables,
         @view model.vegetation_parameters.albedo[:,:,[current_month],:]
     )
 
+    calculate_potential_evaporation!(
+        model.grid_parameters,
+        model.forcing_variables,
+        model.surface_energy_variables,
+        model.vegetation_parameters.architectural_resistance,
+        model.vegetation_parameters.minimum_resistance,
+        @view(model.vegetation_parameters.lai[:,:,[current_month],:]),
+    )
+
     return nothing
 end
+
+
+config_file = "/home/bart/git/mGV/configs/mekong_config.toml"
+cfg = load_config(config_file)
+
+m = Model(cfg)
+
+update!(m)
 
 end # module end

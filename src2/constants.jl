@@ -16,7 +16,7 @@ using Parameters
     PA_PER_KPA::Float32 = 1000.0 # Converted to float to avoid mixed-type math
 
     # Universal Physical Constants
-    K_B::Float32 = 1.38065e23       # Boltzmann's constant (J/K)
+    K_B::Float32 = 1.38065e-23       # Boltzmann's constant (J/K)
     N_A::Float32 = 6.02214e26       # Avogadro's number (molecules/kmole)
     R_GAS = K_B * N_A               # Universal gas constant (J/K/kmole)
     MW_AIR::Float32 = 28.966        # Molecular weight of dry air (kg/kmole)

@@ -90,7 +90,7 @@ end
     lat_var::String = "lat"
     lon_var::String = "lon"
     enable_snow::Bool = true
-    nbands::Int = 1  # snow bands
+    nbands::Int = 5  # snow bands (alternatively, derive from input data)
     fillvalue_threshold::Float32 = 1f15
     start_year::Int
     end_year::Int
