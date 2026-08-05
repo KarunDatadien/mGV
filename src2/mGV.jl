@@ -164,8 +164,13 @@ function update!(model::Model)
     # Compute canopy evaporation
     update_canopy_evaporation!(model)
 
+    # Transpiration
+    update_transpiration!(model)
     
-    
+    # Water balance: throughfall (must run BEFORE snow dynamics so
+    #   the snow kernel sees today's precipitation, not yesterday's)
+    update_water_canopy_storage!(model)
+
     return nothing
 end
 

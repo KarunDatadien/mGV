@@ -142,3 +142,231 @@ function update_canopy_evaporation!(model::Model)
     return nothing
 end
 
+@kernel function transpiration_kernel!(
+    # Outputs
+    transpiration_full,
+    transpiration_layers,
+    # Inputs
+    potential_evaporation, 
+    water_storage, 
+    max_water_storage, 
+    soil_moisture,       
+    soil_moisture_critical,  
+    wilting_point,           
+    root_gpu, 
+    cv_gpu, 
+    f_n,
+    AreaFract,
+    tair_gpu,    # 2D: air temperature [°C] (for Tfactor)
+    vp_gpu       # 2D: vapour pressure [kPa] (for VPDfactor)
+)
+    i, j = @index(Global, NTuple)
+
+    # Boundary Check
+    if i <= size(transpiration_full, 1) && j <= size(transpiration_full, 2)
+        
+        # Constants
+        EPS  = 1f-9
+        ZERO = 0f0
+        ONE  = 1f0
+        
+        # --- 1. SOIL STRESS (g1, g2) ---
+        # Load Layer 1
+        W1   = soil_moisture[i,j,1]
+        Wcr1 = soil_moisture_critical[i,j,1]
+        Wwp1 = wilting_point[i,j,1]
+        
+        # Load Layer 2
+        W2   = soil_moisture[i,j,2]
+        Wcr2 = soil_moisture_critical[i,j,2]
+        Wwp2 = wilting_point[i,j,2]
+
+        # g1 = clamp((W1 - Wwp1) / (Wcr1 - Wwp1 + EPS), 0, 1)
+        g1 = clamp((W1 - Wwp1) / (Wcr1 - Wwp1 + EPS), ZERO, ONE)
+        g2 = clamp((W2 - Wwp2) / (Wcr2 - Wwp2 + EPS), ZERO, ONE)
+
+        # --- 2. VEGETATION LOOP ---
+        nveg = size(root_gpu, 4)
+        nbands = size(transpiration_full, 3)
+        
+        for k in 1:nveg
+            # Load Root Fractions
+            f1 = root_gpu[i,j,1,k]
+            f2 = root_gpu[i,j,2,k]
+            
+            # Branchless root-fraction accumulation
+            W_root_sum   = ifelse(f1 > ZERO, W1, ZERO) + ifelse(f2 > ZERO, W2, ZERO)
+            Wcr_root_sum = ifelse(f1 > ZERO, Wcr1, ZERO) + ifelse(f2 > ZERO, Wcr2, ZERO)
+            
+            share_moist = (W_root_sum >= Wcr_root_sum) & (W_root_sum > ZERO)
+            
+            moist1_wet = W1 >= Wcr1
+            moist2_wet = W2 >= Wcr2
+            
+            g_sw_veg = ifelse(share_moist, ONE, clamp((f1 * g1 + f2 * g2) / (f1 + f2 + EPS), ZERO, ONE))
+
+            e1_total = ZERO
+            e2_total = ZERO
+
+            for b in 1:nbands
+                # --- Canopy Wetness / Dry Time Factor ---
+                ws   = water_storage[i,j,b,k]
+                max_ws = max_water_storage[i,j,b,k]
+                cv   = cv_gpu[i,j,1,k]
+                fn_val = f_n[i,j,b,k]
+                pe   = potential_evaporation[i,j,b,k]
+
+                term_inner = clamp((ws / max(cv, EPS)) / max(max_ws, EPS), ZERO, ONE)
+                dry_time_factor = clamp(ONE - fn_val * (term_inner ^ (2f0/3f0)), ZERO, ONE)
+
+                dry_time_factor = ifelse(k == nveg, ONE, dry_time_factor)
+
+                # --- Jarvis temperature + VPD factor for transpiration ---
+                # Tfactor: reduces transpiration in cold/hot extremes (max=1 at T=25°C)
+                # VPDfactor: CANOPY_CLOSURE=13000 Pa. Using tair_grid for PE slope
+                # gives better transpiration distribution (95.3% in run49).
+                tair_c_v     = tair_gpu[i, j]
+                Tfactor_raw  = 0.08f0 * tair_c_v - 0.0016f0 * tair_c_v * tair_c_v
+                Tfact        = Tfactor_raw < 1.0f-10 ? 1.0f-10 : (Tfactor_raw > ONE ? ONE : Tfactor_raw)
+                svp_val_t    = SVP_A * exp((SVP_B * tair_c_v) / (SVP_C + tair_c_v))  # kPa
+                vpd_pa_t     = max(svp_val_t - vp_gpu[i, j], 0f0) * PA_PER_KPA  # Pa
+                raw_vpd_t    = 1f0 - vpd_pa_t / 13000.0f0
+                VPDfact      = raw_vpd_t < 0.7f0 ? 0.7f0 : (raw_vpd_t > ONE ? ONE : raw_vpd_t)
+                rc_factor    = Tfact * VPDfact
+
+                # --- Transpiration Calculation ---
+                # Output aggregation in io_writer sums trans_val directly (no extra Cv weight).
+                trans_val = clamp(cv * dry_time_factor * pe * g_sw_veg * rc_factor, ZERO, Inf32)
+                
+                # =========================================================
+                # --- Layer Apportionment (E1, E2) without branching ---
+                # =========================================================
+                # If moisture is limited in one layer, roots can pull from another.
+                
+                # Setup base root + moisture weights
+                weight1      = f1 * g1  # root fraction * moisture stress factor
+                weight2      = f2 * g2
+                total_weight = weight1 + weight2 + EPS
+
+                # Option A: Standard Weighted Apportionment
+                # Used when moisture is severely limited (share_moist is false).
+                # Demand is strictly partitioned by the available moisture weight.
+                e1_weighted_demand = trans_val * (weight1 / total_weight)
+                e2_weighted_demand = trans_val * (weight2 / total_weight)
+
+                # Option B: Shared Moisture Apportionment (Roots redistribute uptake)
+                # Used when at least one layer has sufficient moisture (above critical point).
+                
+                # 1. Base uptake demand under shared moisture:
+                # If a layer is fully "wet", it fulfills its entire root fraction demand.
+                # If a layer is "dry", it only fulfills a stress-reduced fraction.
+                e1_shared_base = ifelse(moist1_wet, trans_val * f1, trans_val * g1 * f1)
+                e2_shared_base = ifelse(moist2_wet, trans_val * f2, trans_val * g2 * f2)
+                
+                # 2. Calculate "Spare" ET demand:
+                # This is the unmet demand from dry layers. Because roots are connected,
+                # the plant will try to pull this missing water from the wet layers instead.
+                spare_demand_from_1 = ifelse(moist1_wet, ZERO, trans_val * f1 * (ONE - g1))
+                spare_demand_from_2 = ifelse(moist2_wet, ZERO, trans_val * f2 * (ONE - g2))
+                total_spare_demand  = spare_demand_from_1 + spare_demand_from_2
+                
+                # 3. Calculate wet-layer capacity to receive the spare demand
+                # We identify which layers have surplus moisture capacity to fulfill the spare demand.
+                wet_root_frac_sum    = ifelse(moist1_wet, f1, ZERO) + ifelse(moist2_wet, f2, ZERO)
+                can_distribute_spare = (total_spare_demand > ZERO) & (wet_root_frac_sum > ZERO)
+                
+                # 4. Add the redistributed spare demand back into the wet layers proportionately
+                # The spare demand is sliced up according to the root mass present in the wet layers.
+                spare_share_e1 = ifelse(moist1_wet & can_distribute_spare, total_spare_demand * (f1 / max(wet_root_frac_sum, EPS)), ZERO)
+                spare_share_e2 = ifelse(moist2_wet & can_distribute_spare, total_spare_demand * (f2 / max(wet_root_frac_sum, EPS)), ZERO)
+                
+                e1_shared_total = e1_shared_base + spare_share_e1
+                e2_shared_total = e2_shared_base + spare_share_e2
+                
+                # Finally, select between Option A and Option B seamlessly using a branchless ternary.
+                # This eliminates massive GPU thread divergence caused by unpredictable if/else block stalling.
+                e1_val = ifelse(share_moist, e1_shared_total, e1_weighted_demand)
+                e2_val = ifelse(share_moist, e2_shared_total, e2_weighted_demand)
+
+                trans_val = ifelse(k == nveg, ZERO, trans_val)
+                e1_val    = ifelse(k == nveg, ZERO, e1_val)
+                e2_val    = ifelse(k == nveg, ZERO, e2_val)
+
+                # --- WRITE OUTPUTS ---
+                transpiration_full[i,j,b,k] = trans_val
+                
+                # Accumulate layers
+                e1_total += e1_val * AreaFract[i,j,b]
+                e2_total += e2_val * AreaFract[i,j,b]
+            end
+            
+            # 2. Layer distributed transpiration
+            transpiration_layers[i,j,1,k] = e1_total
+            transpiration_layers[i,j,2,k] = e2_total
+            transpiration_layers[i,j,3,k] = ZERO
+        end
+    end
+end
+
+
+function update_transpiration!(model::Model)
+
+    (; air_temperature, vapor_pressure) = model.forcing_variables
+    (; potential_evaporation) = model.surface_energy_variables
+    (; 
+        water_storage, maximum_water_storage, transpiration, 
+        transpiration_layers, wet_fraction
+    ) = model.canopy_variables
+    (; root_fraction, vegetation_fraction) = model.vegetation_parameters
+    (; snow_band_area_fraction) = model.grid_parameters
+    (; critical_moisture_fraction, wilting_point_fraction) = model.soil_parameters
+    soil_moisture = model.soil_variables.moisture
+
+    # 1. Configuration
+    kernel_launcher! = transpiration_kernel!(device_backend)    
+    nx, ny = size(transpiration)
+
+    # 2. Launch
+    kernel_launcher!(
+        transpiration, 
+        transpiration_layers,
+        potential_evaporation, 
+        water_storage, 
+        maximum_water_storage, 
+        soil_moisture, 
+        critical_moisture_fraction, 
+        wilting_point_fraction, 
+        root_fraction, 
+        vegetation_fraction, 
+        wet_fraction,
+        snow_band_area_fraction,
+        air_temperature,
+        vapor_pressure;
+        ndrange = (nx, ny)
+    )
+
+    return nothing
+end
+
+function update_water_canopy_storage!(model::Model)
+    (; precipitation) = model.forcing_variables
+    (; water_storage, maximum_water_storage, throughfall, canopy_evaporation
+    ) = model.canopy_variables
+
+    current_month = month(model.clock.time)
+    coverage = @views(model.vegetation_parameters.canopy_coverage[:,:,[current_month],:])
+
+    # 1. Update Throughfall FIRST
+    # We calculate the 'excess' logic on the fly using the *current* (old) water_storage.
+    # Logic: excess = max(0, (W + P - E) - Wm)
+    # Throughfall = (excess * coverage) + (precipitation * (1 - coverage))
+    @. throughfall = (max(0f0, water_storage + precipitation - canopy_evaporation - maximum_water_storage) * coverage) + 
+                     (precipitation * (1f0 - coverage))
+
+    # 2. Update Water Storage SECOND
+    # Now we can safely mutate water_storage.
+    # Logic: clamped new storage
+    @. water_storage = clamp(water_storage + precipitation - canopy_evaporation, 0f0, maximum_water_storage)
+
+    return nothing
+end
