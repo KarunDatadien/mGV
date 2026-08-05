@@ -122,21 +122,40 @@ function calculate_net_radiation!(
 )
     (; shortwave_down, longwave_down) = forcing_variables 
     (; surface_temperature, net_radiation) = surface_energy_variables
+    (; EMISSIVITY, SIGMA) = Constants
 
     @. net_radiation = (
         (1.0f0 - albedo) * shortwave_down
         + longwave_down
-        - Constants.EMISSIVITY * Constants.SIGMA * (surface_temperature + 273.15f0) ^ 4
+        - EMISSIVITY * SIGMA * (surface_temperature + 273.15f0) ^ 4
     )
     return nothing
 end
 
+"""
+Compute the net radiation, including the effect of snow cover
+"""
 function calculate_net_radiation!(
     forcing_variables::ForcingVariables,
     surface_energy_variables::SurfaceEnergyVariables,
-    vegetation_parameters::VegetationParameters,
-    snow_variables::SnowVariables
+    snow_variables::SnowVariables,
+    albedo
 )
+    (; shortwave_down, longwave_down) = forcing_variables 
+    (; surface_temperature, net_radiation) = surface_energy_variables
+    (; coverage) = snow_variables
+    (; EMISSIVITY, SIGMA) = Constants
+
+    eff_alb(alb, sc, s_alb) = (isnan(sc) || sc <= 0f0) ? alb : (sc * s_alb + (1f0 - sc) * alb)
+    eff_t(ts, sc, s_ts) = (isnan(sc) || sc <= 0f0) ? ts : (sc * s_ts + (1f0 - sc) * ts)
+    
+    @. net_radiation = (
+        (1f0 - eff_alb(albedo, coverage, snow_variables.albedo)) * shortwave_down + 
+        longwave_down -
+        EMISSIVITY * SIGMA * (
+            eff_t(surface_temperature, coverage, snow_variables.surface_temperature) + 273.15f0
+        )^4
+    )
     return nothing
 end
 
@@ -205,6 +224,7 @@ function potential_evaporation_precompute!(
 end
 
 function calculate_potential_evaporation!(
+    potential_evaporation,
     grid_parameters::GridParameters,
     forcing_variables::ForcingVariables,
     surface_energy_variables::SurfaceEnergyVariables,
@@ -213,7 +233,7 @@ function calculate_potential_evaporation!(
     lai
 )
     (; elevation) = grid_parameters
-    (; potential_evaporation, net_radiation, aerodynamic_resistance) = surface_energy_variables
+    (; net_radiation, aerodynamic_resistance) = surface_energy_variables
     (; air_temperature, surface_pressure, vapor_pressure) = forcing_variables
 
     # Grid dimensions
@@ -243,6 +263,8 @@ function calculate_potential_evaporation!(
         vpd,
         air_dens_term
     )
+
+    ## ToDo; fold the following lines into the kernel as well if possible
     # Vegetation tiles: PE at minimum canopy resistance (gsm_inv=1)
     @views @. potential_evaporation[:, :, :, veg_dim] = max(
         (
@@ -260,6 +282,61 @@ function calculate_potential_evaporation!(
             (slope * (net_radiation[:, :, :, nveg] * DAY_SEC) + (air_dens_term / aerodynamic_resistance[:, :, :, nveg])) / 
             (latent_heat * (slope + gamma * (1f0 + architectural_resistance[:, :, :, nveg] / aerodynamic_resistance[:, :, :, nveg])))
         ), 0f0
+    )
+    return nothing
+end
+
+"""
+Perform the initial energy balance and atmospheric calculations
+"""
+function update_energy_balance!(model::Model)
+    current_month = month(model.clock.time)
+
+    calculate_band_forcings!(
+        model.grid_parameters, model.forcing_variables, model.snow_variables
+    )
+
+    calculate_aerodynamic_resistance!(
+        model.forcing_variables,
+        model.surface_energy_variables,
+        model.soil_parameters,
+        @view(model.vegetation_parameters.displacement_height[:,:,[current_month],:]),
+        @view(model.vegetation_parameters.roughness_length[:,:,[current_month],:])
+    )
+
+    # Step 1: compute WITHOUT snow for PE
+    calculate_net_radiation!(
+        model.forcing_variables,
+        model.surface_energy_variables,
+        @view model.vegetation_parameters.albedo[:,:,[current_month],:]
+    )
+
+    calculate_potential_evaporation!(
+        model.surface_energy_variables.potential_evaporation,
+        model.grid_parameters,
+        model.forcing_variables,
+        model.surface_energy_variables,
+        model.vegetation_parameters.architectural_resistance,
+        model.vegetation_parameters.minimum_resistance,
+        @view(model.vegetation_parameters.lai[:,:,[current_month],:]),
+    )
+
+    # Step 2: recompute WITH snow for the full energy balance
+    calculate_net_radiation!(
+        model.forcing_variables,
+        model.surface_energy_variables,
+        model.snow_variables,
+        @view model.vegetation_parameters.albedo[:,:,[current_month],:]
+    )
+
+    calculate_potential_evaporation!(
+        model.surface_energy_variables.soil_potential_evaporation,
+        model.grid_parameters,
+        model.forcing_variables,
+        model.surface_energy_variables,
+        model.vegetation_parameters.architectural_resistance,
+        model.vegetation_parameters.minimum_resistance,
+        @view(model.vegetation_parameters.lai[:,:,[current_month],:]),
     )
     return nothing
 end
