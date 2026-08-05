@@ -129,6 +129,8 @@ end
 
 """
 Compute the slope of the saturation vapor pressure curve.
+
+Note: input temperature should be in degC
 """
 function calculate_svp_slope(air_temperature)
     # Re-calculate SVP part locally (scalar)

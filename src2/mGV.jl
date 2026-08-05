@@ -23,8 +23,6 @@ include("reader.jl")
 include("parameters.jl")
 include("physics.jl")
 include("snow.jl")
-include("energy_balance.jl")
-
 
 """Validate the path of a file relative to the given directory."""
 function validate_path(file, dir)
@@ -98,6 +96,8 @@ require.
     # writer::W                       # writes model output
 end
 
+include("energy_balance.jl")
+include("evaporation.jl")
 
 function Model(config::Cfg)
     clock = Clock(config)
@@ -150,7 +150,7 @@ end
 function update!(model::Model)
     advance!(model.clock)
     update_forcing!(model.clock.time, model.forcing_readers, model.forcing_variables)
-    current_month = month(model.clock.time)
+    
 
     # Initialize surface temperature on first timestep
     if model.clock.iteration == 1
@@ -159,36 +159,13 @@ function update!(model::Model)
     end
 
     # Energy balance and atmospheric calculations
-    #--------------------------------------------
+    update_energy_balance!(model)
 
-    calculate_band_forcings!(
-        model.grid_parameters, model.forcing_variables, model.snow_variables
-    )
+    # Compute canopy evaporation
+    update_canopy_evaporation!(model)
 
-    calculate_aerodynamic_resistance!(
-        model.forcing_variables,
-        model.surface_energy_variables,
-        model.soil_parameters,
-        @view(model.vegetation_parameters.displacement_height[:,:,[current_month],:]),
-        @view(model.vegetation_parameters.roughness_length[:,:,[current_month],:])
-    )
-
-    # Step 1: compute WITHOUT snow for PE
-    calculate_net_radiation!(
-        model.forcing_variables,
-        model.surface_energy_variables,
-        @view model.vegetation_parameters.albedo[:,:,[current_month],:]
-    )
-
-    calculate_potential_evaporation!(
-        model.grid_parameters,
-        model.forcing_variables,
-        model.surface_energy_variables,
-        model.vegetation_parameters.architectural_resistance,
-        model.vegetation_parameters.minimum_resistance,
-        @view(model.vegetation_parameters.lai[:,:,[current_month],:]),
-    )
-
+    
+    
     return nothing
 end
 
@@ -199,5 +176,6 @@ cfg = load_config(config_file)
 m = Model(cfg)
 
 update!(m)
+
 
 end # module end
