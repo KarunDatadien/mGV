@@ -171,6 +171,8 @@ function update!(model::Model)
     #   the snow kernel sees today's precipitation, not yesterday's)
     update_water_canopy_storage!(model)
 
+    update_snow!(model)
+
     return nothing
 end
 
