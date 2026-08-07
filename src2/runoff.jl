@@ -397,3 +397,11 @@ function calculate_infiltration!(infiltration, throughfall, surface_runoff, cv_g
 
     return nothing
 end
+
+function update_total_runoff!(model)
+    (; surface_runoff, subsurface_runoff, total_runoff) = model.soil_variables
+
+    @. total_runoff = surface_runoff + subsurface_runoff
+
+    return nothing
+end

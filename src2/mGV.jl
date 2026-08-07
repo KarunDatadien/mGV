@@ -176,9 +176,11 @@ function update!(model::Model)
 
     update_soil!(model)
 
+    # update total fluxes
     update_total_evapotranspiration!(model)
+    update_total_runoff!(model)
 
-
+    # run routing
     return nothing
 end
 
