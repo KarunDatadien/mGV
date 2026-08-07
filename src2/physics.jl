@@ -55,42 +55,42 @@ function CanopyVariables(dims)
 end
 
 
-struct SoilVariables{T <: AbstractArray}
+struct SoilVariables{M <: AbstractMatrix, T <: AbstractArray}
     # State
     moisture::T
     temperature::T
     ice_fraction::T
 
     # Fluxes
-    evaporation::T
-    infiltration::T
-    surface_runoff::T
-    subsurface_runoff::T
-    total_runoff::T
+    evaporation::M
+    infiltration::M
+    surface_runoff::M
+    subsurface_runoff::M
+    total_runoff::M
     interlayer_drainage::T
 
     # Derived/intermediate
     thermal_conductivity::T
     heat_capacity::T
-    saturated_fraction::T
+    saturated_fraction::M
 end
 
 @adapt_structure SoilVariables
 
-function SoilVariables(dims)
+function SoilVariables(grid_dims, soil_dims)
     return SoilVariables(
-        zeros(Float32, dims),
-        zeros(Float32, dims),
-        zeros(Float32, dims),
-        zeros(Float32, dims),
-        zeros(Float32, dims),
-        zeros(Float32, dims),
-        zeros(Float32, dims),
-        zeros(Float32, dims),
-        zeros(Float32, dims),
-        zeros(Float32, dims),
-        zeros(Float32, dims),
-        zeros(Float32, dims)
+        zeros(Float32, soil_dims),
+        zeros(Float32, soil_dims),
+        zeros(Float32, soil_dims),
+        zeros(Float32, grid_dims),
+        zeros(Float32, grid_dims),
+        zeros(Float32, grid_dims),
+        zeros(Float32, grid_dims),
+        zeros(Float32, grid_dims),
+        zeros(Float32, (grid_dims[1], grid_dims[2], soil_dims[3]-1)),
+        zeros(Float32, soil_dims),
+        zeros(Float32, soil_dims),
+        zeros(Float32, grid_dims)
     )
 end
 

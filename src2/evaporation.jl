@@ -370,3 +370,27 @@ function update_water_canopy_storage!(model::Model)
 
     return nothing
 end
+
+# Eq. (23): Total evapotranspiration
+function update_total_evapotranspiration!(model)
+    (; total_evapotranspiration) = model.surface_energy_variables
+    (; transpiration, canopy_evaporation) = model.canopy_variables
+    soil_evaporation = model.soil_variables.evaporation
+    (; vegetation_fraction, canopy_coverage) = model.vegetation_parameters
+    (; snow_band_area_fraction) = model.grid_parameters
+
+    # 1. Initialize with Soil Evaporation
+    @. total_evapotranspiration = soil_evaporation
+
+    # 2. Accumulate Vegetation Fluxes
+    # We loop over tiles to avoid allocating massive intermediate arrays.
+    for i in 1:size(canopy_evaporation, 4)
+        for b in 1:size(canopy_evaporation, 3)
+            @views @. total_evapotranspiration += (
+                canopy_evaporation[:,:,b,i] * vegetation_fraction[:,:,1,i] + transpiration[:,:,b,i]
+            ) * canopy_coverage[:,:,1,i] * snow_band_area_fraction[:,:,b]
+        end
+    end
+
+    return nothing
+end

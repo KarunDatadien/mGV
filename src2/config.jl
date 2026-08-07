@@ -48,6 +48,7 @@ end
     hydraulic_conductivity::String = "Ksat"
     depth::String = "depth"
     initial_moisture::String = "init_moist"
+    maximum_moisture::String = "max_moist"
     residual_moisture::String = "resid_moist"
     critical_moisture_fraction::String = "Wcr_FRACT"
     field_capacity_fraction::String = "Wfc_FRACT"

@@ -33,6 +33,7 @@ struct SoilParameters{M <: AbstractMatrix, T <: AbstractArray}
     hydraulic_conductivity::T
     depth::T
     initial_moisture::T
+    maximum_moisture::T
     residual_moisture::T
     critical_moisture_fraction::T
     field_capacity_fraction::T
@@ -89,6 +90,7 @@ function read_parameters(config::Cfg)
         nomissing(ds_params[cfg.input.names.hydraulic_conductivity][:,:,:], 0.0),
         nomissing(ds_params[cfg.input.names.depth][:,:,:], 0.0),
         nomissing(ds_params[cfg.input.names.initial_moisture][:,:,:], 0.0),
+        nomissing(ds_params[cfg.input.names.maximum_moisture][:,:,:], 0.0),
         nomissing(ds_params[cfg.input.names.residual_moisture][:,:,:], 0.0),
         nomissing(ds_params[cfg.input.names.critical_moisture_fraction][:,:,:], 0.0),
         nomissing(ds_params[cfg.input.names.field_capacity_fraction][:,:,:], 0.0),

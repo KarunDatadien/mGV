@@ -23,6 +23,7 @@ include("reader.jl")
 include("parameters.jl")
 include("physics.jl")
 include("snow.jl")
+include("soil.jl")
 
 """Validate the path of a file relative to the given directory."""
 function validate_path(file, dir)
@@ -116,7 +117,7 @@ function Model(config::Cfg)
 
     surface_energy_variables = SurfaceEnergyVariables(grid_dims, tile_dims)
     canopy_variables = CanopyVariables(tile_dims)
-    soil_variables = SoilVariables(soil_dims)
+    soil_variables = SoilVariables(grid_dims, soil_dims)
     snow_variables = SnowVariables(nx, ny, nbands, nveg)
 
     # Move data to backend during model initialization
@@ -173,6 +174,11 @@ function update!(model::Model)
 
     update_snow!(model)
 
+    update_soil!(model)
+
+    update_total_evapotranspiration!(model)
+
+
     return nothing
 end
 
@@ -181,8 +187,14 @@ config_file = "/home/bart/git/mGV/configs/mekong_config.toml"
 cfg = load_config(config_file)
 
 m = Model(cfg)
-
 update!(m)
 
+# t0 = time()
+# end_time = DateTime(m.config.end_year, 12, 31)
+# while m.clock.time < end_time
+#     update!(m)
+# end
+
+# print(time() - t0)
 
 end # module end
