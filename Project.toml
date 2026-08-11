@@ -1,6 +1,7 @@
 [deps]
 AMDGPU = "21141c5a-9bdb-4563-92ae-f87d6854732e"
 Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
+Atomix = "a9b6321e-bd34-4604-b9c9-b65b8de01458"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 Configurations = "5218b696-f38b-4ac9-8b61-a12ec717816d"
 JuliaC = "acedd4c2-ced6-4a15-accc-2607eb759ba2"

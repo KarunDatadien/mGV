@@ -34,18 +34,25 @@ struct SoilParameters{M <: AbstractMatrix, T <: AbstractArray}
     depth::T
     initial_moisture::T
     maximum_moisture::T
+    residual_moisture_fraction::T  # intermediary
     residual_moisture::T
-    critical_moisture_fraction::T
-    field_capacity_fraction::T
-    wilting_point_fraction::T
+    critical_moisture_fraction::T # intermediary
+    critical_moisture::T
+    field_capacity_fraction::T # intermediary
+    field_capacity::T
+    wilting_point_fraction::T # intermediary
+    wilting_point::T
     quartz_content::T
     bare_roughness::M
     bulk_density::T
+    minimum_bulk_density::T
     particle_density::T
+    minimum_particle_density::T
+    porosity::T
     campbell_n::T
     nijssen_infilt_b::M
     nijssen_lin_reservoir::M
-    nijssen_nolin_reservoir::M
+    nijssen_nonlin_reservoir::M
     moisture_depth_baseflow_transition::M
     column_depth::M
     baseflow_curve_exp::M
@@ -86,23 +93,31 @@ function read_parameters(config::Cfg)
         nomissing(ds_params[cfg.input.names.canopy_coverage][:,:,:,:], 0.0)
     )
 
+    bulk_density = nomissing(ds_params[cfg.input.names.bulk_density][:,:,:], 0.0)
     soil_params = SoilParameters(
         nomissing(ds_params[cfg.input.names.hydraulic_conductivity][:,:,:], 0.0),
         nomissing(ds_params[cfg.input.names.depth][:,:,:], 0.0),
         nomissing(ds_params[cfg.input.names.initial_moisture][:,:,:], 0.0),
         nomissing(ds_params[cfg.input.names.maximum_moisture][:,:,:], 0.0),
-        nomissing(ds_params[cfg.input.names.residual_moisture][:,:,:], 0.0),
+        nomissing(ds_params[cfg.input.names.residual_moisture_fraction][:,:,:], 0.0),
+        zeros(eltype(bulk_density), size(bulk_density)),
         nomissing(ds_params[cfg.input.names.critical_moisture_fraction][:,:,:], 0.0),
+        zeros(eltype(bulk_density), size(bulk_density)),
         nomissing(ds_params[cfg.input.names.field_capacity_fraction][:,:,:], 0.0),
+        zeros(eltype(bulk_density), size(bulk_density)),
         nomissing(ds_params[cfg.input.names.wilting_point_fraction][:,:,:], 0.0),
+        zeros(eltype(bulk_density), size(bulk_density)),
         nomissing(ds_params[cfg.input.names.quartz_content][:,:,:], 0.0),
         nomissing(ds_params[cfg.input.names.bare_roughness][:,:], 0.0),
-        nomissing(ds_params[cfg.input.names.bulk_density][:,:,:], 0.0),
+        bulk_density,
+        zeros(eltype(bulk_density), size(bulk_density)),  # calculated later
         nomissing(ds_params[cfg.input.names.particle_density][:,:,:], 0.0),
+        zeros(eltype(bulk_density), size(bulk_density)),
+        zeros(eltype(bulk_density), size(bulk_density)),
         nomissing(ds_params[cfg.input.names.campbell_n][:,:,:], 0.0),
         nomissing(ds_params[cfg.input.names.nijssen_infilt_b][:,:], 0.0),
         nomissing(ds_params[cfg.input.names.nijssen_lin_reservoir][:,:], 0.0),
-        nomissing(ds_params[cfg.input.names.nijssen_nolin_reservoir][:,:], 0.0),
+        nomissing(ds_params[cfg.input.names.nijssen_nonlin_reservoir][:,:], 0.0),
         nomissing(ds_params[cfg.input.names.moisture_depth_baseflow_transition][:,:], 0.0),
         nomissing(ds_params[cfg.input.names.column_depth][:,:], 0.0),
         nomissing(ds_params[cfg.input.names.baseflow_curve_exp][:,:], 0.0)
@@ -158,3 +173,4 @@ function read_and_allocate_parameter(varname::String)
 
     return cpu_preload, device_arr
 end
+

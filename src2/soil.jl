@@ -1,5 +1,126 @@
 include("runoff.jl")
 
+@kernel function soil_properties_kernel!(
+    # Outputs
+    bulk_dens_min, soil_dens_min, porosity,
+    soil_moisture_max, soil_moisture_critical, 
+    field_capacity, wilting_point, residual_moisture,
+    # Inputs
+    @Const(bulk_dens), @Const(soil_dens), @Const(depth),
+    @Const(Wcr), @Const(Wfc), @Const(Wpwp), @Const(residmoist),
+    # Constants
+    ORGANIC_FRAC, BULK_DENS_ORG, SOIL_DENS_ORG
+)
+    i, j, k = @index(Global, NTuple)
+
+    # 1. Mineral Densities
+    bd_val = bulk_dens[i, j, k]
+    sd_val = soil_dens[i, j, k]
+    
+    # We use the types passed in (FloatType) automatically
+    bd_min = (bd_val - ORGANIC_FRAC * BULK_DENS_ORG) / (1 - ORGANIC_FRAC)
+    sd_min = (sd_val - ORGANIC_FRAC * SOIL_DENS_ORG) / (1 - ORGANIC_FRAC)
+    
+    bulk_dens_min[i, j, k] = bd_min
+    soil_dens_min[i, j, k] = sd_min
+
+    # 2. Porosity
+    p = 1 - (bd_val / sd_val)
+    # Ensure 0 matches the array type to avoid type promotion issues
+    p = max(p, zero(eltype(porosity)))
+    porosity[i, j, k] = p
+
+    # 3. Hydraulic Properties
+    d = depth[i, j, k]
+    
+    w_max = d * p * 1000
+    soil_moisture_max[i, j, k] = w_max
+    
+    # Fractions
+    soil_moisture_critical[i, j, k] = Wcr[i, j, k] * w_max
+    field_capacity[i, j, k]         = Wfc[i, j, k] * w_max
+    wilting_point[i, j, k]          = Wpwp[i, j, k] * w_max
+    
+    residual_moisture[i, j, k]      = residmoist[i, j, k] * d * 1000
+end
+
+"""
+Some soil parameters are not precalculated in the parameter input data.
+These need to be precalculated to model-compatible forms.
+Most notably some parameters are denoted as fractions (e.g. [mm/mm]),
+but are needed in absolute terms ([mm]).
+"""
+function derive_soil_parameters!(soil_parameters)
+    (;
+        # Outputs
+        minimum_bulk_density, minimum_particle_density, porosity,
+        maximum_moisture, critical_moisture,
+        field_capacity, wilting_point,
+        residual_moisture, 
+        # Inputs
+        bulk_density, particle_density, depth,
+        critical_moisture_fraction, # Wcr
+        field_capacity_fraction, # Wfc
+        wilting_point_fraction,  # Wpwp
+        residual_moisture_fraction,  # resid_moist
+    ) = soil_parameters
+    (; ORGANIC_FRAC, BULK_DENS_ORG, SOIL_DENS_ORG) = Constants
+
+    kernel_launcher! = soil_properties_kernel!(device_backend)
+    
+    kernel_launcher!(
+        minimum_bulk_density, minimum_particle_density, porosity,
+        maximum_moisture, critical_moisture, 
+        field_capacity, wilting_point, residual_moisture,
+        bulk_density, particle_density, depth,
+        critical_moisture_fraction, field_capacity_fraction, wilting_point_fraction, residual_moisture_fraction,
+        ORGANIC_FRAC, BULK_DENS_ORG, SOIL_DENS_ORG;
+        ndrange=size(bulk_density)
+    )
+    
+end
+
+"""
+NIJSSEN2001 BASEFLOW CONVERSION KERNEL
+"""
+@kernel function convert_nijssen2001_kernel!(Dsmax, Ds, Ws, @Const(c), @Const(max_moist))
+    i, j = @index(Global, NTuple)
+    
+    d1 = Ds[i, j]
+    d2 = Dsmax[i, j]
+    d3 = Ws[i, j]
+    d4 = c[i, j]
+    
+    # VIC extracts ARNO limits strictly across the Layer 3 bound natively `options.Nlayer - 1`
+    m_max = max_moist[i, j, 3]
+    
+    T = eltype(Dsmax)
+    EPS = T(1e-9)
+    
+    if m_max > T(0) && d3 < m_max
+        new_Dsmax = d2 * ((m_max - d3) ^ d4) + d1 * m_max
+        new_Ds = (d1 * d3) / max(new_Dsmax, EPS)
+        new_Ws = d3 / m_max
+        
+        Dsmax[i, j] = new_Dsmax
+        Ds[i, j] = new_Ds
+        Ws[i, j] = new_Ws
+    end
+end
+
+function convert_nijssen2001_to_arno!(soil_parameters)
+    (; 
+      nijssen_nonlin_reservoir, nijssen_lin_reservoir, 
+      moisture_depth_baseflow_transition, baseflow_curve_exp, maximum_moisture
+    ) = soil_parameters
+
+    kernel_launcher! = convert_nijssen2001_kernel!(device_backend)
+    kernel_launcher!(
+        nijssen_nonlin_reservoir, nijssen_lin_reservoir, moisture_depth_baseflow_transition, baseflow_curve_exp, maximum_moisture;
+        ndrange=size(nijssen_nonlin_reservoir)
+    )
+end
+
 """
 Scalar Physics Kernel (Inner Function)
 """
@@ -90,7 +211,7 @@ function update_soil!(model)
     (;
         nijssen_infilt_b, residual_moisture, maximum_moisture,
         hydraulic_conductivity, campbell_n, 
-        nijssen_lin_reservoir, nijssen_nolin_reservoir,
+        nijssen_lin_reservoir, nijssen_nonlin_reservoir,
         moisture_depth_baseflow_transition, baseflow_curve_exp
     ) = model.soil_parameters
     (; soil_potential_evaporation) = model.surface_energy_variables
@@ -117,8 +238,82 @@ function update_soil!(model)
         moisture, subsurface_runoff, surface_runoff, interlayer_drainage,
         infiltration, evaporation, transpiration_grid,
         maximum_moisture, hydraulic_conductivity, residual_moisture, campbell_n,
-        nijssen_nolin_reservoir, nijssen_lin_reservoir, 
+        nijssen_nonlin_reservoir, nijssen_lin_reservoir, 
         moisture_depth_baseflow_transition, baseflow_curve_exp
     )
     return nothing
+end
+
+@kernel function soil_conductivity_kernel!(
+    moist, ice_frac, soil_dens_min, bulk_dens_min, quartz, ORGANIC_FRAC, porosity, kappa
+)
+    (; KW, KI, KS_ORG, KDRY_ORG) = Constants
+
+    I = @index(Global)
+
+    # 1. Unfrozen water content
+    Wu = moist[I] - ice_frac[I]
+
+    # 2. Dry conductivity (Kdry)
+    # Formula: (0.135*bulk + 64.7) / (soil_dens - 0.947*bulk)
+    Kdry_min = (0.135f0 * bulk_dens_min[I] + 64.7f0) / (soil_dens_min[I] - 0.947f0 * bulk_dens_min[I])
+    Kdry     = (1f0 - ORGANIC_FRAC) * Kdry_min + ORGANIC_FRAC * KDRY_ORG
+
+    # 3. Fractional degree of saturation (Sr)
+    Sr = ifelse(porosity[I] > 0f0, moist[I] / porosity[I], 0f0)
+
+    # 4. Mineral soil conductivity (Ks_min)
+    Ks_min = ifelse(
+        quartz[I] < 0.2f0,
+        7.7f0 ^ quartz[I] * 3f0 ^ (1f0 - quartz[I]),
+        ifelse(
+            quartz[I] <= 1f0,
+            7.7f0 ^ quartz[I] * 2.2f0 ^ (1f0 - quartz[I]),
+            0f0
+        )
+    )
+    
+    Ks = (1f0 - ORGANIC_FRAC) * Ks_min + ORGANIC_FRAC * KS_ORG
+
+    # 5. Saturated conductivity (Ksat)
+    Ksat = ifelse(Wu == moist[I],
+                  Ks ^ (1f0 - porosity[I]) * KW ^ porosity[I],
+                  Ks ^ (1f0 - porosity[I]) * KI ^ (porosity[I] - Wu) * KW ^ Wu)
+
+    # 6. Effective saturation parameter (Ke)
+    Ke = ifelse(Wu == moist[I],
+                0.7f0 * log10(max(Sr, 1.0f-10)) + 1f0,
+                Sr)
+
+    # 7. Final Kappa Calculation
+    # If moist > 0, interpolate. Else Kdry.
+    term_moist = (Ksat - Kdry) * Ke + Kdry
+    kappa[I] = ifelse(
+        moist[I] > 0f0,
+        max(term_moist, Kdry),
+        Kdry
+    )
+end
+
+function update_soil_conductivity!(model)
+    (; ORGANIC_FRAC) = Constants
+    (; minimum_particle_density, minimum_bulk_density, quartz_content, porosity) = model.soil_parameters
+    (; thermal_conductivity, moisture, ice_fraction) = model.soil_variables
+
+    kernel = soil_conductivity_kernel!(device_backend)
+
+    kernel(
+        moisture, 
+        ice_fraction, 
+        minimum_particle_density, 
+        minimum_bulk_density, 
+        quartz_content, 
+        ORGANIC_FRAC, 
+        porosity,
+        thermal_conductivity,
+        ndrange=size(moisture)
+    )
+    return nothing
+
+
 end

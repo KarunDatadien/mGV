@@ -24,6 +24,7 @@ include("parameters.jl")
 include("physics.jl")
 include("snow.jl")
 include("soil.jl")
+include("routing.jl")
 
 """Validate the path of a file relative to the given directory."""
 function validate_path(file, dir)
@@ -93,7 +94,7 @@ require.
     snow_variables::SnowVariables
     forcing_variables::ForcingVariables
     forcing_readers::ForcingReaders
-    # routing::R                      # routing model (horizontal fluxes), moves along network
+    routing::RoutingState
     # writer::W                       # writes model output
 end
 
@@ -119,6 +120,7 @@ function Model(config::Cfg)
     canopy_variables = CanopyVariables(tile_dims)
     soil_variables = SoilVariables(grid_dims, soil_dims)
     snow_variables = SnowVariables(nx, ny, nbands, nveg)
+    routing = RoutingState(config, grid_parameters.elevation)
 
     # Move data to backend during model initialization
     if backend_name != "CPU"
@@ -130,7 +132,11 @@ function Model(config::Cfg)
         soil_variables = adapt(ArrayType, soil_variables)
         snow_variables = adapt(ArrayType, snow_variables)
         forcing_variables = adapt(ArrayType, forcing_variables)
+        routing = adapt(ArrayType, routing)
     end
+
+    derive_soil_parameters!(soil_parameters)
+    convert_nijssen2001_to_arno!(soil_parameters)
 
     return Model(
         ;
@@ -145,13 +151,13 @@ function Model(config::Cfg)
         snow_variables,
         forcing_variables,
         forcing_readers,
+        routing,
     )
 end
 
 function update!(model::Model)
     advance!(model.clock)
     update_forcing!(model.clock.time, model.forcing_readers, model.forcing_variables)
-    
 
     # Initialize surface temperature on first timestep
     if model.clock.iteration == 1
@@ -181,6 +187,11 @@ function update!(model::Model)
     update_total_runoff!(model)
 
     # run routing
+    #  Note: fix violation_counter
+    update_routing!(model)
+
+    update_soil_conductivity!(model)
+
     return nothing
 end
 
@@ -196,7 +207,7 @@ update!(m)
 # while m.clock.time < end_time
 #     update!(m)
 # end
-
 # print(time() - t0)
+
 
 end # module end
