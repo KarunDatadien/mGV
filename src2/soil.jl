@@ -317,3 +317,60 @@ function update_soil_conductivity!(model)
 
 
 end
+
+
+"""
+Update the soil's volumetric heat capacity based on new soil moisture and ice fraction values.
+"""
+function update_soil_volumetric_heat_capacity!(model)
+    (; bulk_density, particle_density) = model.soil_parameters
+    (; heat_capacity, moisture, ice_fraction) = model.soil_variables
+    (; RHO_W, ORGANIC_FRAC) = Constants
+
+    @. begin
+        # Calculate Cs
+        # (1.0 - ORGANIC_FRAC) splits the soil_fract into mineral/organic components
+        # Constant values are volumetric heat capacities in J/m^3/K
+
+        heat_capacity = (
+            2.0f6 * (bulk_density / particle_density) * (1f0 - ORGANIC_FRAC) +
+            2.7f6 * (bulk_density / particle_density) * ORGANIC_FRAC +
+            4.2f6 * (moisture / RHO_W) +
+            1.9f6 * ice_fraction +
+            1.3f3 * (1f0 - ((bulk_density / particle_density) + (moisture / RHO_W) + ice_fraction))
+        )
+    end
+
+    return nothing
+end
+
+
+function estimate_soil_layer_temperature!(model)
+    (; temperature) = model.soil_variables
+    (; depth, column_depth) = model.soil_parameters
+    (; surface_temperature) = model.surface_energy_variables
+    (; air_temperature) = model.forcing_variables
+
+    # Define views for clarity
+    T_L1 = @view temperature[:, :, 1]
+    T_L2 = @view temperature[:, :, 2]
+    T_L3 = @view temperature[:, :, 3]
+    
+    D_L2 = @view depth[:, :, 2]
+    D_L3 = @view depth[:, :, 3]
+
+    # --- 1. Update Layer 3 ---
+    # Must be done FIRST because it depends on the OLD values of L1 and L2
+    # We inline the calculation of top_avg = (L1 + L2) * 0.5
+    @. T_L3 = air_temperature - (column_depth / D_L3) * (((T_L1 + T_L2) * 0.5f0) - air_temperature) * (exp(-(D_L2 + D_L3) / column_depth) - exp(-D_L2 / column_depth))
+
+    # --- 2. Update Layer 1 ---
+    # We inline top_avg again 
+    @. T_L1 = 0.5f0 * (surface_temperature + ((T_L1 + T_L2) * 0.5f0))
+
+    # --- 3. Update Layer 2 ---
+    # L2 is modeled identically to L1, so we just copy the new L1 values
+    @. T_L2 = T_L1
+    
+    return nothing
+end

@@ -242,7 +242,7 @@ end
 function update_routing!(model)
     (; routing) = model
     (; total_runoff) = model.soil_variables
-    dt = model.config.timestep
+    dt = Int32(model.clock.dt.value)
     
     routing.violation_counter .= 0
     n_pixels = Int32(length(routing.downstream_idx))

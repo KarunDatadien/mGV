@@ -25,6 +25,7 @@ include("physics.jl")
 include("snow.jl")
 include("soil.jl")
 include("routing.jl")
+include("temperature.jl")
 
 """Validate the path of a file relative to the given directory."""
 function validate_path(file, dir)
@@ -191,7 +192,20 @@ function update!(model::Model)
     update_routing!(model)
 
     update_soil_conductivity!(model)
+    update_soil_volumetric_heat_capacity!(model)
+    estimate_soil_layer_temperature!(model)
 
+    if model.clock.iteration == 1
+        update_surface_temperature!(model)
+        update_aerodynamic_resistance!(model)
+    end
+    update_surface_temperature!(model)
+
+    update_net_radiation_post_closure!(model)
+
+    # post process
+
+    # write away results
     return nothing
 end
 
@@ -202,12 +216,13 @@ cfg = load_config(config_file)
 m = Model(cfg)
 update!(m)
 
-# t0 = time()
-# end_time = DateTime(m.config.end_year, 12, 31)
-# while m.clock.time < end_time
-#     update!(m)
-# end
-# print(time() - t0)
+t0 = time()
+end_time = DateTime(m.config.end_year, 12, 31)
+while m.clock.time < end_time
+    update!(m)
+    println(maximum(m.routing.discharge))
+end
+print(time() - t0)
 
 
 end # module end

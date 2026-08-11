@@ -61,16 +61,15 @@ function aerodynamic_kernel(z0, d0, tsurf, tair, wind, Z2, Kt, gt, Tf, Ric, z_fl
     return clamp(ra_val, ra_min, ra_max)
 end
 
-function calculate_aerodynamic_resistance!(
-    forcing_variables::ForcingVariables,
-    surface_energy_variables::SurfaceEnergyVariables,
-    soil_parameters::SoilParameters,
-    displacement_height,
-    roughness_length,
-)
-    (; surface_temperature, aerodynamic_resistance) = surface_energy_variables
-    (; air_temperature, wind_speed) = forcing_variables
-    (; bare_roughness) = soil_parameters
+function update_aerodynamic_resistance!(model)
+    current_month = month(model.clock.time)
+
+    displacement_height = @view(model.vegetation_parameters.displacement_height[:,:,[current_month],:])
+    roughness_length = @view(model.vegetation_parameters.roughness_length[:,:,[current_month],:])
+
+    (; surface_temperature, aerodynamic_resistance) = model.surface_energy_variables
+    (; air_temperature, wind_speed) = model.forcing_variables
+    (; bare_roughness) = model.soil_parameters
     (; Z2, VON_KARMAN, G, T_FREEZE, RI_CR) = Constants
 
     # Local constants
@@ -296,13 +295,7 @@ function update_energy_balance!(model::Model)
         model.grid_parameters, model.forcing_variables, model.snow_variables
     )
 
-    calculate_aerodynamic_resistance!(
-        model.forcing_variables,
-        model.surface_energy_variables,
-        model.soil_parameters,
-        @view(model.vegetation_parameters.displacement_height[:,:,[current_month],:]),
-        @view(model.vegetation_parameters.roughness_length[:,:,[current_month],:])
-    )
+    update_aerodynamic_resistance!(model)
 
     # Step 1: compute WITHOUT snow for PE
     calculate_net_radiation!(
@@ -339,4 +332,15 @@ function update_energy_balance!(model::Model)
         @view(model.vegetation_parameters.lai[:,:,[current_month],:]),
     )
     return nothing
+end
+
+function update_net_radiation_post_closure!(model)
+    current_month = month(model.clock.time)
+
+    calculate_net_radiation!(
+        model.forcing_variables,
+        model.surface_energy_variables,
+        model.snow_variables,
+        @view model.vegetation_parameters.albedo[:,:,[current_month],:]
+    )
 end

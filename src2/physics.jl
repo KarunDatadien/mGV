@@ -6,7 +6,7 @@ struct SurfaceEnergyVariables{M <: AbstractMatrix, T <: AbstractArray}
     net_radiation::T
     potential_evaporation::T
     soil_potential_evaporation::T
-    total_evapotranspiration::T
+    total_evapotranspiration::M
 
     # Derived/intermediate
     aerodynamic_resistance::T
@@ -20,7 +20,7 @@ function SurfaceEnergyVariables(grid_dims, tile_dims)
         zeros(Float32, tile_dims),
         zeros(Float32, tile_dims),
         zeros(Float32, tile_dims),
-        zeros(Float32, tile_dims),
+        zeros(Float32, grid_dims),
         zeros(Float32, tile_dims)
     )
 end
