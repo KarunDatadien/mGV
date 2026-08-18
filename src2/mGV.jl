@@ -26,6 +26,7 @@ include("snow.jl")
 include("soil.jl")
 include("routing.jl")
 include("temperature.jl")
+include("postprocess.jl")
 
 """Validate the path of a file relative to the given directory."""
 function validate_path(file, dir)
@@ -204,6 +205,7 @@ function update!(model::Model)
     update_net_radiation_post_closure!(model)
 
     # post process
+    results = process_daily_outputs!(model)
 
     # write away results
     return nothing
