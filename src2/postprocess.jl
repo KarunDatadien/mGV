@@ -66,14 +66,14 @@
     ws_out[i, j] = ifelse(active, acc_ws, fill_val)
 end
 
-@kwdef struct Results{M <: AbstractMatrix, T <: AbstractArray}
+@kwdef struct Results{M, T}
     surface_temperature::M # tsurf
     air_temperature::M # tair
     precipitation::M # prec
     total_evapotranspiration::M # total_et
     surface_runoff::M # surface_runoff
     total_runoff::M
-    discarge::M # discharge
+    discharge::M # discharge
     travel_time::M # travel_time
     potential_evaporation::M # pe_summed
     net_radiation::M # nr_summed
@@ -85,7 +85,6 @@ end
     snow_surface_temperature::M
     snow_coverage::M
     snow_melt::M
-    # interlayer_drainage::T  # Q12 (initialized but not written)
     soil_evaporation::M
     soil_moisture::T  # 3D (nx, ny, nlayers)
 end
@@ -123,7 +122,7 @@ function agg_4d_snow(swe, coverage, melt, snow_fraction, veg_fraction)
 end
 
 
-function process_daily_outputs!(model)
+function process_daily_outputs(model)
     current_month = month(model.clock.time)
 
     (;
@@ -235,7 +234,7 @@ function process_daily_outputs!(model)
         total_evapotranspiration=total_evapotranspiration,
         surface_runoff=surface_runoff,
         total_runoff=total_runoff,
-        discarge=discharge_2d,
+        discharge=discharge_2d,
         travel_time=travel_time_2d,
         potential_evaporation=pe_summed,
         net_radiation=nr_summed,

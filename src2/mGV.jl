@@ -12,6 +12,7 @@ using Printf
 using Statistics
 using KernelAbstractions
 using Adapt: adapt, @adapt_structure
+using Accessors: @set
 
 include("config.jl")
 using .Config: load_config, Cfg
@@ -27,6 +28,7 @@ include("soil.jl")
 include("routing.jl")
 include("temperature.jl")
 include("postprocess.jl")
+include("io.jl")
 
 """Validate the path of a file relative to the given directory."""
 function validate_path(file, dir)
@@ -97,7 +99,7 @@ require.
     forcing_variables::ForcingVariables
     forcing_readers::ForcingReaders
     routing::RoutingState
-    # writer::W                       # writes model output
+    writer::Union{AsyncBufferService, Nothing} # writes model output
 end
 
 include("energy_balance.jl")
@@ -140,6 +142,8 @@ function Model(config::Cfg)
     derive_soil_parameters!(soil_parameters)
     convert_nijssen2001_to_arno!(soil_parameters)
 
+    writer = start_io_service(config, grid_parameters, year(clock.time), clock.dt)
+
     return Model(
         ;
         config,
@@ -154,6 +158,7 @@ function Model(config::Cfg)
         forcing_variables,
         forcing_readers,
         routing,
+        writer
     )
 end
 
@@ -205,9 +210,28 @@ function update!(model::Model)
     update_net_radiation_post_closure!(model)
 
     # post process
-    results = process_daily_outputs!(model)
+    results = process_daily_outputs(model)
 
-    # write away results
+    # write away results if data writer is available
+    if !isnothing(model.writer)
+        write_results(model.writer, model.clock, results)
+    end
+
+    # next time step will be new year; close file output
+    if !isnothing(model.writer) && year(model.clock.time + model.clock.dt) > year(model.clock.time)
+        # close output
+        stop_async_service(model.writer)
+
+        if year(model.clock.time) == model.config.end_year
+            # if model has reached end time step set writer to nothing
+            @set model.writer = nothing
+    
+        else
+            # otherwise set up new output file
+            println("Starting new io service...")
+            @set model.writer = start_io_service(model.config, model.grid_parameters, year(model.clock.time) + 1, model.clock.dt)
+        end
+    end
     return nothing
 end
 
@@ -222,7 +246,9 @@ t0 = time()
 end_time = DateTime(m.config.end_year, 12, 31)
 while m.clock.time < end_time
     update!(m)
-    println(maximum(m.routing.discharge))
+    if m.clock.iteration % 30 == 0
+        println("Iteration: ", m.clock.iteration, "  Q: ", maximum(m.routing.discharge))
+    end
 end
 print(time() - t0)
 
