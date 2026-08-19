@@ -44,7 +44,7 @@ close_output(store::ZarrOutputStore) = nothing # No action needed for Zarr
 close_output(store::NetCDFOutputStore) = close(store.ds)
 
 
-function create_output_zarr(output_path::String, nx, ny, nt, nlayers, lat_cpu, lon_cpu)
+function create_output_zarr(output_path::String, year, nx, ny, nt, nlayers, lat_cpu, lon_cpu)
     println("Initializing Zarr store at: $output_path")
     isdir(output_path) && rm(output_path, recursive=true)
     mkpath(output_path)
@@ -76,7 +76,7 @@ function create_output_zarr(output_path::String, nx, ny, nt, nlayers, lat_cpu, l
     # Coords and time
     time_values = collect(0:nt-1) 
     z_time = make_zarr("time", (nt,), (nt,), ["time"]; 
-                   attrs=Dict("units"=>"days since 1979-01-01", "calendar"=>"proleptic_gregorian"))
+                   attrs=Dict("units"=>"days since $year-01-01", "calendar"=>"proleptic_gregorian"))
     z_time[:] = time_values
     z_lat = make_zarr("lat", (length(lat_cpu),), (length(lat_cpu),), ["lat"]; attrs=Dict("units"=>"degrees_north", "axis"=>"Y"))
     z_lat[:] = lat_cpu
@@ -247,6 +247,11 @@ function write_slice!(time_index, buf::TransferBuffer, store::NetCDFOutputStore)
     store.data.soil_moisture[:, :, time_index, :]         = buf.soil_moisture
 end
 
+mutable struct OutputWriter
+    io_service
+    store
+end
+
 function start_io_service(
     config::Cfg,
     grid_parameters::GridParameters,
@@ -261,19 +266,19 @@ function start_io_service(
 
     nlayers = 3  # hardcoded 3 soil layers
     
-    if config.output.format == :netcdf
+    if lowercase(config.output.format) == "netcdf"
         output_path = joinpath(config.output.dir, "$(config.output.file_prefix)$(year).nc")
         # Create a buffer pool 
         output_store, _ = create_output_netcdf(output_path, nx, ny, nt, nlayers, grid_parameters.latitude, grid_parameters.longitude)
     else
         output_path = joinpath(config.output.dir, "$(config.output.file_prefix)$(year).zarr")
-        output_store, _ = create_output_zarr(output_path, nx, ny, nt, nlayers, grid_parameters.latitude, grid_parameters.longitude)
+        output_store, _ = create_output_zarr(output_path, year, nx, ny, nt, nlayers, grid_parameters.latitude, grid_parameters.longitude)
     end
 
     # Start the ssync pool 
     println("Starting Async I/O Service...")
     io_service = start_async_service(nx, ny, nlayers, output_store, 6)
-    return io_service
+    return OutputWriter(io_service, output_store)
 end
 
 

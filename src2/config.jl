@@ -81,7 +81,7 @@ end
 end
 
 @option "output" struct OutputCfg
-    format::String = "Zarr"
+    format::String = "zarr"
     dir::String
     file_prefix::String
 end

@@ -99,7 +99,7 @@ require.
     forcing_variables::ForcingVariables
     forcing_readers::ForcingReaders
     routing::RoutingState
-    writer::Union{AsyncBufferService, Nothing} # writes model output
+    writer::Union{OutputWriter, Nothing} # writes model output
 end
 
 include("energy_balance.jl")
@@ -214,13 +214,14 @@ function update!(model::Model)
 
     # write away results if data writer is available
     if !isnothing(model.writer)
-        write_results(model.writer, model.clock, results)
+        write_results(model.writer.io_service, model.clock, results)
     end
 
     # next time step will be new year; close file output
     if !isnothing(model.writer) && year(model.clock.time + model.clock.dt) > year(model.clock.time)
         # close output
-        stop_async_service(model.writer)
+        stop_async_service(model.writer.io_service)
+        close_output(model.writer.store)
 
         if year(model.clock.time) == model.config.end_year
             # if model has reached end time step set writer to nothing
@@ -229,7 +230,11 @@ function update!(model::Model)
         else
             # otherwise set up new output file
             println("Starting new io service...")
-            @set model.writer = start_io_service(model.config, model.grid_parameters, year(model.clock.time) + 1, model.clock.dt)
+            new_writer = start_io_service(
+                model.config, model.grid_parameters, year(model.clock.time) + 1, model.clock.dt
+            )
+            model.writer.io_service = new_writer.io_service
+            model.writer.store = new_writer.store
         end
     end
     return nothing
@@ -247,10 +252,15 @@ end_time = DateTime(m.config.end_year, 12, 31)
 while m.clock.time < end_time
     update!(m)
     if m.clock.iteration % 30 == 0
-        println("Iteration: ", m.clock.iteration, "  Q: ", maximum(m.routing.discharge))
+        println(
+            "Time: ", m.clock.time,
+            " - Iteration: ", m.clock.iteration,
+            " - Qmax: ", maximum(m.routing.discharge),
+            " - P: ", maximum(m.forcing_variables.precipitation)
+        )
     end
 end
-print(time() - t0)
+println("Elapsed time: ", time() - t0)
 
 
 end # module end
