@@ -1,4 +1,4 @@
-using NCDatasets.CommonDataModel: CFVariable, @select
+using NCDatasets.CommonDataModel: CFVariable, MFCFVariable, @select
 using Dates: DateTime
 
 const FORCING_COORDS = [
@@ -33,18 +33,17 @@ end
 
 @adapt_structure ForcingVariables
 
-
 @kwdef struct ForcingReaders
-    time::CFVariable
-    latitude::CFVariable
-    longitude::CFVariable
-    precipitation::CFVariable
-    air_temperature::CFVariable
-    wind_speed::CFVariable
-    vapor_pressure::CFVariable
-    shortwave_down::CFVariable
-    longwave_down::CFVariable
-    surface_pressure::CFVariable
+    time::Union{CFVariable, MFCFVariable}
+    latitude::Union{CFVariable, MFCFVariable}
+    longitude::Union{CFVariable, MFCFVariable}
+    precipitation::Union{CFVariable, MFCFVariable}
+    air_temperature::Union{CFVariable, MFCFVariable}
+    wind_speed::Union{CFVariable, MFCFVariable}
+    vapor_pressure::Union{CFVariable, MFCFVariable}
+    shortwave_down::Union{CFVariable, MFCFVariable}
+    longwave_down::Union{CFVariable, MFCFVariable}
+    surface_pressure::Union{CFVariable, MFCFVariable}
 end
 
 """
@@ -54,7 +53,8 @@ loading.
 function open_forcing(cfg::Cfg)
     years = cfg.start_year:cfg.end_year
     var_prefixes = [getval(cfg.input.paths, "$(var)_file") for var in FORCING_VARS]
-    files = Vector{String}(undef, length(years) * length(var_prefixes))
+    files = Vector{String}(undef, length(years))
+    datasets = Vector{Any}(undef,  length(var_prefixes))
 
     for i = eachindex(var_prefixes)
         for j = eachindex(years)
@@ -62,17 +62,21 @@ function open_forcing(cfg::Cfg)
                 "$(var_prefixes[i])$(years[j]).nc",
                 dirname(config_file)
             )
-            files[j+length(years)*(i-1)] = ncfile
+            files[j] = ncfile
         end
+        datasets[i] = NCDataset(unique(files), aggdim="time")
     end
 
-    files = unique(files)  # vars can be in the same files, eg 1 zarr store
-    ds = NCDataset(files, aggdim = "")
+    vars_dict = Dict()
 
-    vars_dict = Dict(
-        var => ds[getval(cfg.input.names, var)]
-        for var in [FORCING_COORDS; FORCING_VARS]
-    )
+    for i in eachindex(FORCING_VARS)
+        var = FORCING_VARS[i]
+        vars_dict[var] = datasets[i][getval(cfg.input.names, var)]
+    end
+    for var in FORCING_COORDS
+        vars_dict[var] = datasets[1][getval(cfg.input.names, var)]
+    end
+
     return ForcingReaders(; (Symbol.(keys(vars_dict)) .=> values(vars_dict))...)
 end
 
