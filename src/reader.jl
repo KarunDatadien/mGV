@@ -50,7 +50,7 @@ end
 Open the forcing input data files to prepare for stepwise data
 loading.
 """
-function open_forcing(cfg::Cfg)
+function open_forcing(config_file::AbstractString, cfg::Cfg)
     years = cfg.start_year:cfg.end_year
     var_prefixes = [getval(cfg.input.paths, "$(var)_file") for var in FORCING_VARS]
     files = Vector{String}(undef, length(years))
@@ -94,8 +94,8 @@ end
 Initialize forcing reader and read the first timestep of
 forcing data.
 """
-function initialize_forcing(cfg::Cfg)
-    forcing_readers = open_forcing(cfg)
+function initialize_forcing(config_file::AbstractString, cfg::Cfg)
+    forcing_readers = open_forcing(config_file, cfg)
     start_time = DateTime(cfg.start_year,1,1)
     forcing_vars = ForcingVariables(;
         ((Symbol(var) => read_var(start_time, forcing_readers, var)) for var in FORCING_VARS)...

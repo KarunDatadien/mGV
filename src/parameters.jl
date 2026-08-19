@@ -63,64 +63,64 @@ end
 function read_parameters(config::Cfg)
     ds_params = NCDataset(config.input.paths.input_param_file)
     grid_params = GridParameters(
-        nomissing(ds_params[cfg.input.names.latitude][:], 0.0),
-        nomissing(ds_params[cfg.input.names.longitude][:], 0.0),
-        nomissing(ds_params[cfg.input.names.elevation][:,:], 0.0),
-        nomissing(ds_params[cfg.input.names.average_temperature][:,:], 0.0),
-        nomissing(ds_params[cfg.input.names.annual_precipitation][:,:], 0.0),
-        nomissing(ds_params[cfg.input.names.snow_band_area_fraction][:,:,:], 0.0),
-        nomissing(ds_params[cfg.input.names.snow_band_elevation][:,:,:], 0.0),
-        nomissing(ds_params[cfg.input.names.snow_band_precipitation_factor][:,:,:], 0.0),
+        nomissing(ds_params[config.input.names.latitude][:], 0.0),
+        nomissing(ds_params[config.input.names.longitude][:], 0.0),
+        nomissing(ds_params[config.input.names.elevation][:,:], 0.0),
+        nomissing(ds_params[config.input.names.average_temperature][:,:], 0.0),
+        nomissing(ds_params[config.input.names.annual_precipitation][:,:], 0.0),
+        nomissing(ds_params[config.input.names.snow_band_area_fraction][:,:,:], 0.0),
+        nomissing(ds_params[config.input.names.snow_band_elevation][:,:,:], 0.0),
+        nomissing(ds_params[config.input.names.snow_band_precipitation_factor][:,:,:], 0.0),
     )
 
     # Reshape some 3D inputs to 4D
-    cv = nomissing(ds_params[cfg.input.names.vegetation_fraction][:,:,:], 0.0)
+    cv = nomissing(ds_params[config.input.names.vegetation_fraction][:,:,:], 0.0)
     vegetation_fraction = ndims(cv) == 3 ? reshape(cv, size(cv, 1), size(cv, 2), 1, size(cv, 3)) : cv
-    rmin = nomissing(ds_params[cfg.input.names.minimum_resistance][:,:,:], 0.0)
+    rmin = nomissing(ds_params[config.input.names.minimum_resistance][:,:,:], 0.0)
     minimum_resistance = ndims(rmin) == 3 ? reshape(rmin, size(rmin, 1), size(rmin, 2), 1, size(rmin, 3)) : rmin
-    rarc = nomissing(ds_params[cfg.input.names.architectural_resistance][:,:,:], 0.0)
+    rarc = nomissing(ds_params[config.input.names.architectural_resistance][:,:,:], 0.0)
     architectural_resistance = ndims(rarc) == 3 ? reshape(rarc, size(rarc, 1), size(rarc, 2), 1, size(rarc, 3)) : rarc
 
     veg_params = VegetationParameters(
-        nomissing(ds_params[cfg.input.names.root_fraction][:,:,:,:], 0.0),
+        nomissing(ds_params[config.input.names.root_fraction][:,:,:,:], 0.0),
         vegetation_fraction,
         minimum_resistance,
         architectural_resistance,
-        nomissing(ds_params[cfg.input.names.displacement_height][:,:,:,:], 0.0),
-        nomissing(ds_params[cfg.input.names.roughness_length][:,:,:,:], 0.0),
-        nomissing(ds_params[cfg.input.names.lai][:,:,:,:], 0.0),
-        nomissing(ds_params[cfg.input.names.albedo][:,:,:,:], 0.0),
-        nomissing(ds_params[cfg.input.names.canopy_coverage][:,:,:,:], 0.0)
+        nomissing(ds_params[config.input.names.displacement_height][:,:,:,:], 0.0),
+        nomissing(ds_params[config.input.names.roughness_length][:,:,:,:], 0.0),
+        nomissing(ds_params[config.input.names.lai][:,:,:,:], 0.0),
+        nomissing(ds_params[config.input.names.albedo][:,:,:,:], 0.0),
+        nomissing(ds_params[config.input.names.canopy_coverage][:,:,:,:], 0.0)
     )
 
-    bulk_density = nomissing(ds_params[cfg.input.names.bulk_density][:,:,:], 0.0)
+    bulk_density = nomissing(ds_params[config.input.names.bulk_density][:,:,:], 0.0)
     soil_params = SoilParameters(
-        nomissing(ds_params[cfg.input.names.hydraulic_conductivity][:,:,:], 0.0),
-        nomissing(ds_params[cfg.input.names.depth][:,:,:], 0.0),
-        nomissing(ds_params[cfg.input.names.initial_moisture][:,:,:], 0.0),
-        nomissing(ds_params[cfg.input.names.maximum_moisture][:,:,:], 0.0),
-        nomissing(ds_params[cfg.input.names.residual_moisture_fraction][:,:,:], 0.0),
+        nomissing(ds_params[config.input.names.hydraulic_conductivity][:,:,:], 0.0),
+        nomissing(ds_params[config.input.names.depth][:,:,:], 0.0),
+        nomissing(ds_params[config.input.names.initial_moisture][:,:,:], 0.0),
+        nomissing(ds_params[config.input.names.maximum_moisture][:,:,:], 0.0),
+        nomissing(ds_params[config.input.names.residual_moisture_fraction][:,:,:], 0.0),
         zeros(eltype(bulk_density), size(bulk_density)),
-        nomissing(ds_params[cfg.input.names.critical_moisture_fraction][:,:,:], 0.0),
+        nomissing(ds_params[config.input.names.critical_moisture_fraction][:,:,:], 0.0),
         zeros(eltype(bulk_density), size(bulk_density)),
-        nomissing(ds_params[cfg.input.names.field_capacity_fraction][:,:,:], 0.0),
+        nomissing(ds_params[config.input.names.field_capacity_fraction][:,:,:], 0.0),
         zeros(eltype(bulk_density), size(bulk_density)),
-        nomissing(ds_params[cfg.input.names.wilting_point_fraction][:,:,:], 0.0),
+        nomissing(ds_params[config.input.names.wilting_point_fraction][:,:,:], 0.0),
         zeros(eltype(bulk_density), size(bulk_density)),
-        nomissing(ds_params[cfg.input.names.quartz_content][:,:,:], 0.0),
-        nomissing(ds_params[cfg.input.names.bare_roughness][:,:], 0.0),
+        nomissing(ds_params[config.input.names.quartz_content][:,:,:], 0.0),
+        nomissing(ds_params[config.input.names.bare_roughness][:,:], 0.0),
         bulk_density,
         zeros(eltype(bulk_density), size(bulk_density)),  # calculated later
-        nomissing(ds_params[cfg.input.names.particle_density][:,:,:], 0.0),
+        nomissing(ds_params[config.input.names.particle_density][:,:,:], 0.0),
         zeros(eltype(bulk_density), size(bulk_density)),
         zeros(eltype(bulk_density), size(bulk_density)),
-        nomissing(ds_params[cfg.input.names.campbell_n][:,:,:], 0.0),
-        nomissing(ds_params[cfg.input.names.nijssen_infilt_b][:,:], 0.0),
-        nomissing(ds_params[cfg.input.names.nijssen_lin_reservoir][:,:], 0.0),
-        nomissing(ds_params[cfg.input.names.nijssen_nonlin_reservoir][:,:], 0.0),
-        nomissing(ds_params[cfg.input.names.moisture_depth_baseflow_transition][:,:], 0.0),
-        nomissing(ds_params[cfg.input.names.column_depth][:,:], 0.0),
-        nomissing(ds_params[cfg.input.names.baseflow_curve_exp][:,:], 0.0)
+        nomissing(ds_params[config.input.names.campbell_n][:,:,:], 0.0),
+        nomissing(ds_params[config.input.names.nijssen_infilt_b][:,:], 0.0),
+        nomissing(ds_params[config.input.names.nijssen_lin_reservoir][:,:], 0.0),
+        nomissing(ds_params[config.input.names.nijssen_nonlin_reservoir][:,:], 0.0),
+        nomissing(ds_params[config.input.names.moisture_depth_baseflow_transition][:,:], 0.0),
+        nomissing(ds_params[config.input.names.column_depth][:,:], 0.0),
+        nomissing(ds_params[config.input.names.baseflow_curve_exp][:,:], 0.0)
     )
     return grid_params, veg_params, soil_params
 end

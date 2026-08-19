@@ -105,16 +105,18 @@ end
 include("energy_balance.jl")
 include("evaporation.jl")
 
-function Model(config::Cfg)
+function Model(config_file::AbstractString)
+    config = load_config(config_file)
+
     clock = Clock(config)
-    forcing_readers, forcing_variables = initialize_forcing(config)
+    forcing_readers, forcing_variables = initialize_forcing(config_file, config)
     grid_parameters, vegetation_parameters, soil_parameters = read_parameters(config)
 
     # Check dim order!
     nx = length(grid_parameters.longitude)
     ny = length(grid_parameters.latitude)
-    nveg = cfg.nveg  # vegetation types
-    nbands = cfg.nbands  # snow bands
+    nveg = config.nveg  # vegetation types
+    nbands = config.nbands  # snow bands
     nlayers = size(soil_parameters.depth, 3) # derive soil layers from input data
     grid_dims = (nx, ny)
     tile_dims = (nx, ny, nbands, nveg)
@@ -240,27 +242,27 @@ function update!(model::Model)
     return nothing
 end
 
+function run(config_file::AbstractString)
+    m = Model(config_file)
 
-config_file = "/home/bart/git/mGV/configs/mekong_config.toml"
-cfg = load_config(config_file)
-
-m = Model(cfg)
-update!(m)
-
-t0 = time()
-end_time = DateTime(m.config.end_year, 12, 31)
-while m.clock.time < end_time
-    update!(m)
-    if m.clock.iteration % 30 == 0
-        println(
-            "Time: ", m.clock.time,
-            " - Iteration: ", m.clock.iteration,
-            " - Qmax: ", maximum(m.routing.discharge),
-            " - P: ", maximum(m.forcing_variables.precipitation)
-        )
+    end_time = DateTime(m.config.end_year + 1) - m.clock.dt
+    while m.clock.time < end_time
+        update!(m)
     end
+    return m
 end
-println("Elapsed time: ", time() - t0)
 
+function run()
+    usage = "Usage: julia -e 'using mGV; mGV.run()' 'path/to/config.toml'"
+    n = length(ARGS)
+    if n != 1
+        throw(ArgumentError(usage))
+    end
+    cfg_path = only(ARGS)
+    if !isfile(cfg_path)
+        throw(ArgumentError("Config file not found: $(cfg_path)\n"))
+    end
+    return run(cfg_path)
+end
 
 end # module end

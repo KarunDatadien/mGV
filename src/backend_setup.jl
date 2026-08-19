@@ -1,32 +1,6 @@
-using KernelAbstractions
-
-global float_type = Float32 # User settable float precision
-
-# ===========================================================================
-# 1. PRECISION & THREAD CONFIGURATION
-# ===========================================================================
-if !isdefined(Main, :float_type)
-    println("⚠️ User didn't specify a type in the configuration file. Defaulting to Float32.")
-    const FloatType = Float32
-else
-    const FloatType = float_type
-end
-
-ft(x) = FloatType(x)
-
-println("Precision set to: $FloatType")
-println("Active Julia Threads: $(Threads.nthreads())")
-
-# ===========================================================================
-# 2. PACKAGE LOADING
-# ===========================================================================
 const HAS_CUDA   = try using CUDA;   true catch; false end
 const HAS_AMDGPU = try using AMDGPU; true catch; false end
 const HAS_METAL  = try using Metal;  true catch; false end
-
-# ===========================================================================
-# 3. DEVICE (GPU type or CPU) & ARRAY CONFIGURATION
-# ===========================================================================
 
 if HAS_CUDA && CUDA.functional()
     const device_backend = CUDABackend()
@@ -74,15 +48,3 @@ else
     pin_memory!(arr) = nothing
     println("⚠️  GPU not found. Active device: CPU")
 end
-
-# ===========================================================================
-# 4. MEMORY ALLOCATION HELPER
-# ===========================================================================
-
-# 1. Generic version: User specifies the type (e.g., alloc(Int32, 5))
-alloc(T::DataType, dims...) = KernelAbstractions.zeros(device_backend, T, dims...)
-
-# 2. Physics version: Defaults to FloatType (e.g., alloc(nx, ny))
-alloc(dims...) = alloc(FloatType, dims...)
-
-println("✅ Memory allocator configured for: $backend_name")
