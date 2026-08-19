@@ -275,7 +275,7 @@ function start_io_service(
         output_store, _ = create_output_zarr(output_path, year, nx, ny, nt, nlayers, grid_parameters.latitude, grid_parameters.longitude)
     end
 
-    # Start the ssync pool 
+    # Start the async pool 
     println("Starting Async I/O Service...")
     io_service = start_async_service(nx, ny, nlayers, output_store, 6)
     return OutputWriter(io_service, output_store)

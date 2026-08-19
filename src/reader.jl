@@ -64,7 +64,7 @@ function open_forcing(config_file::AbstractString, cfg::Cfg)
             )
             files[j] = ncfile
         end
-        datasets[i] = NCDataset(unique(files), aggdim="time")
+        datasets[i] = NCDataset(unique(files), aggdim = "time", deferopen = false)
     end
 
     vars_dict = Dict()
@@ -87,7 +87,7 @@ function read_var(time, readers::ForcingReaders, var::String)
     var_reader = getval(readers, var)
     # dim_order = dimnames(var_reader)  # use to check dim order with alternative input data
     time_slice = @select(var_reader, time ≈ $time)
-    return nomissing(time_slice, NaN)[:,:]
+    return time_slice.var[:,:] :: Array{Float32, 2}  # NOTE: no missing data checks
 end
 
 """

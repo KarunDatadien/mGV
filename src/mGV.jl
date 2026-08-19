@@ -30,6 +30,8 @@ include("temperature.jl")
 include("postprocess.jl")
 include("io.jl")
 
+const to = TimerOutputs.TimerOutput()
+
 """Validate the path of a file relative to the given directory."""
 function validate_path(file, dir)
     file = abspath(joinpath(dir, file))
@@ -164,8 +166,9 @@ function Model(config_file::AbstractString)
     )
 end
 
-function update!(model::Model)
+@timeit_all to function update!(model::Model)
     advance!(model.clock)
+
     update_forcing!(model.clock.time, model.forcing_readers, model.forcing_variables)
 
     # Initialize surface temperature on first timestep
@@ -249,6 +252,7 @@ function run(config_file::AbstractString)
     while m.clock.time < end_time
         update!(m)
     end
+    show(to)
     return m
 end
 
