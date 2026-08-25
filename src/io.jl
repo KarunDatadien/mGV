@@ -120,6 +120,7 @@ end
 
 function create_output_netcdf(output_file::String, nx, ny, nt, nlayers, lat_cpu, lon_cpu)
     println("Creating NetCDF output file at: $output_file")
+    mkpath(dirname(output_file))
     out_ds = NCDataset(output_file, "c")
     
     # Dimensions
