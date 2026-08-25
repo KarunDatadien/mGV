@@ -5,6 +5,7 @@ enable_snow = false
 [output]
 dir         = "../output_data/mekong/"
 file_prefix = "outputfile_mekong_"
+format      = "netcdf"
 
 [input]
 [input.paths]
