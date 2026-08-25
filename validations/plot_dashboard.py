@@ -17,6 +17,7 @@ import matplotlib.ticker as ticker
 import warnings
 import os
 import sys
+import csv as csv_mod
 
 
 warnings.filterwarnings("ignore")
@@ -50,6 +51,104 @@ ET_VARS = [
     ("OUT_EVAP_BARE",  "soil_evaporation_output",            "Soil Evaporation",    "mm d$^{-1}$"),
     ("OUT_PET",        "potential_evaporation_summed_output","Potential ET",         "mm d$^{-1}$"),
 ]
+
+# ── CSV reference helpers ─────────────────────────────────────────────────────
+VIC_CSV_VARS = [
+    "OUT_SURF_TEMP", "OUT_R_NET", "OUT_EVAP", "OUT_TRANSP_VEG",
+    "OUT_EVAP_CANOP", "OUT_EVAP_BARE", "OUT_PET",
+    "OUT_RUNOFF", "OUT_BASEFLOW",
+    "OUT_SOIL_MOIST_L1", "OUT_SOIL_MOIST_L2", "OUT_SOIL_MOIST_L3",
+]
+
+def preprocess_vic_to_csv(vic_nc_path, out_csv_path):
+    """Extract spatially-averaged VIC timeseries from NetCDF and save as CSV."""
+    print(f"  Pre-processing VIC reference -> {out_csv_path}")
+    ds = nc.Dataset(vic_nc_path)
+    mask = get_land_mask(ds, "OUT_SURF_TEMP")
+
+    def _spatial_mean(raw):
+        if raw.ndim == 3:
+            T, nlat, nlon = raw.shape
+            if mask is not None:
+                m3 = np.broadcast_to(mask[np.newaxis], raw.shape).copy()
+                raw = np.where(m3, raw, np.nan)
+            return np.nanmean(raw.reshape(T, -1), axis=1)[:365]
+        return raw.ravel()[:365]
+
+    def _load(varname, layer=None):
+        if varname not in ds.variables:
+            return np.full(365, np.nan)
+        raw = np.ma.filled(ds.variables[varname][:], np.nan).astype(float)
+        raw[np.abs(raw) > 1e15] = np.nan
+        sh = raw.shape
+        if raw.ndim == 4 and layer is not None:
+            if sh[1] <= 5 and sh[0] > 50:
+                raw = raw[:, layer]
+            elif sh[0] <= 5 and sh[1] > 50:
+                raw = raw[layer]
+        return _spatial_mean(raw)
+
+    rows = []
+    scalar_vars = [v for v in VIC_CSV_VARS if not v.startswith("OUT_SOIL_MOIST_L")]
+    for i in range(365):
+        row = {"doy": i + 1}
+        for v in scalar_vars:
+            ts = _load(v)
+            row[v] = float(ts[i]) if i < len(ts) else float("nan")
+        for l in range(3):
+            ts = _load("OUT_SOIL_MOIST", layer=l)
+            row[f"OUT_SOIL_MOIST_L{l+1}"] = float(ts[i]) if i < len(ts) else float("nan")
+        rows.append(row)
+
+    ds.close()
+    out_csv_path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = ["doy"] + scalar_vars + ["OUT_SOIL_MOIST_L1", "OUT_SOIL_MOIST_L2", "OUT_SOIL_MOIST_L3"]
+    with open(out_csv_path, "w", newline="") as f:
+        writer = csv_mod.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    print(f"  Saved reference CSV ({out_csv_path.stat().st_size / 1024:.1f} KB)")
+
+
+class VicCsvDataset:
+    """Thin wrapper around a VIC CSV reference file, mimicking the nc.Dataset interface
+    just enough for the load_ts / load_sm helpers to work."""
+    def __init__(self, path):
+        self._data = {}  # varname -> np.array of shape (365, 1, 1)
+        with open(path, newline="") as f:
+            reader = csv_mod.DictReader(f)
+            rows = list(reader)
+        for col in rows[0].keys():
+            if col == "doy":
+                continue
+            arr = np.array([float(r[col]) for r in rows])  # (365,)
+            self._data[col] = arr[:, np.newaxis, np.newaxis]  # (365, 1, 1)
+        # Soil moisture: merge L1/L2/L3 -> (time, layer, lat, lon)
+        layers = []
+        for l in range(1, 4):
+            key = f"OUT_SOIL_MOIST_L{l}"
+            if key in self._data:
+                layers.append(self._data.pop(key))
+        if layers:
+            self._data["OUT_SOIL_MOIST"] = np.stack(layers, axis=1)  # (365, 3, 1, 1)
+        self.variables = self._data
+
+    def close(self):
+        pass
+
+
+def open_vic(nc_path, csv_path, label):
+    """Open VIC data: prefer CSV if no NetCDF, auto-generate CSV when NetCDF exists."""
+    if nc_path.exists():
+        print(f"  Found NetCDF for {label}, pre-processing to CSV...")
+        preprocess_vic_to_csv(nc_path, csv_path)
+        return nc.Dataset(nc_path)
+    if csv_path.exists():
+        print(f"  Loading VIC reference from CSV: {csv_path}")
+        return VicCsvDataset(csv_path)
+    print(f"WARNING: No VIC data found for {label} (neither NetCDF nor CSV)", file=sys.stderr)
+    return None
+
 
 # ── Data helpers ──────────────────────────────────────────────────────────────
 def open_dataset(path, label):
@@ -256,19 +355,21 @@ if __name__ == "__main__":
     outdir = Path(__file__).parent.resolve()
 
     if case == "Mekong":
-        vic_file = outdir / "mekong_VICrun" / "results" / "mekong_test.1979-01-01.nc"
+        vic_nc   = outdir / "mekong_VICrun" / "results" / "mekong_test.1979-01-01.nc"
+        vic_csv  = outdir / "mekong_VICrun" / "vic_reference_mekong.csv"
         mgv_file = outdir / ".." / "output_data" / "mekong" / "outputfile_mekong_1979.nc"
     elif case == "Indus":
-        vic_file = outdir / "indus_VICrun" / "results" / "indus_test.1979-01-01.nc"
+        vic_nc   = outdir / "indus_VICrun" / "results" / "indus_test.1979-01-01.nc"
+        vic_csv  = outdir / "indus_VICrun" / "vic_reference_indus.csv"
         mgv_file = outdir / ".." / "output_data" / "indus" / "outputfile_indus_1979.nc"
 
-    # Exit only if BOTH files are missing (no data at all to plot)
-    if not vic_file.exists() and not mgv_file.exists():
+    # Exit only if BOTH VIC source and mGV output are missing
+    if not vic_nc.exists() and not vic_csv.exists() and not mgv_file.exists():
         print("WARNING: Both input files missing, skipping dashboard.", file=sys.stderr)
         sys.exit(0)
 
     print(f"=== {case} ===")
-    vic_mek = open_dataset(vic_file, f"VIC {case}")
+    vic_mek = open_vic(vic_nc, vic_csv, case)
     mgv_mek = open_dataset(mgv_file, f"mGV {case}")
     mask_v_mek, mask_m_mek = get_masks(vic_mek, mgv_mek, "OUT_SURF_TEMP", "tsurf_output")
 
