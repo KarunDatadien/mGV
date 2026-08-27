@@ -146,6 +146,9 @@ function Model(config_file::AbstractString)
     derive_soil_parameters!(soil_parameters)
     convert_nijssen2001_to_arno!(soil_parameters)
 
+    # Initialize soil moisture and clamp between 0 and maximum_moisture
+    @. soil_variables.moisture = clamp(soil_parameters.initial_moisture, 0.0f0, soil_parameters.maximum_moisture)
+
     writer = start_io_service(config, grid_parameters, year(clock.time), clock.dt)
 
     return Model(

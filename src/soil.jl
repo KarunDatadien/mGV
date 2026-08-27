@@ -218,10 +218,12 @@ function update_soil!(model)
     (; vegetation_fraction, canopy_coverage) = model.vegetation_parameters
     (; snow_band_area_fraction) = model.grid_parameters
     (; throughfall, transpiration_layers) = model.canopy_variables
+    current_month = month(model.clock.time)
+    coverage = @views(canopy_coverage[:, :, current_month:current_month, :])
 
     calculate_soil_evaporation!(
         evaporation, moisture, maximum_moisture, soil_potential_evaporation,  # Step 2 (snow-blended) PE
-        nijssen_infilt_b, vegetation_fraction, canopy_coverage, residual_moisture, snow_band_area_fraction
+        nijssen_infilt_b, vegetation_fraction, coverage, residual_moisture, snow_band_area_fraction
     )
 
     calculate_surface_runoff!(
@@ -230,10 +232,13 @@ function update_soil!(model)
         maximum_moisture, nijssen_infilt_b, vegetation_fraction, snow_band_area_fraction
     )
 
-    calculate_infiltration!(infiltration, throughfall, surface_runoff, vegetation_fraction)
+    calculate_infiltration!(
+        infiltration, throughfall, surface_runoff,
+        vegetation_fraction, snow_band_area_fraction
+    )
 
     # Soil moisture update
-    transpiration_grid = sum(transpiration_layers .* vegetation_fraction, dims=4)
+    transpiration_grid = sum(transpiration_layers .* coverage, dims=4)
     solve_runoff_and_drainage!(
         moisture, subsurface_runoff, surface_runoff, interlayer_drainage,
         infiltration, evaporation, transpiration_grid,

@@ -53,7 +53,7 @@ function canopy_evap_physics(
     evap = f_n_val * canopy_evap_star
     
     # Sanitize outputs to prevent NaN propagation
-    if isnan(evap) | abs(evap > 1f15)
+    if isnan(evap) | (abs(evap) > 1f15)
         evap = 0f0
     end
 
@@ -120,8 +120,8 @@ function update_canopy_evaporation!(model::Model)
     nveg = size(maximum_water_storage, 4)
 
     canopy_evaporation_kernel!(device_backend)(
-        repeat(@view(lai[:,:,[current_month],:]), outer=[1,1,nbands]),
-        repeat(@view(canopy_coverage[:,:,[current_month],:]), outer=[1,1,nbands]),
+        repeat(@view(lai[:,:,current_month:current_month,:]), outer=[1,1,nbands]),
+        repeat(@view(canopy_coverage[:,:,current_month:current_month,:]), outer=[1,1,nbands]),
         model.config.fillvalue_threshold,
         maximum_water_storage,
         canopy_evaporation,
@@ -319,7 +319,7 @@ function update_transpiration!(model::Model)
     ) = model.canopy_variables
     (; root_fraction, vegetation_fraction) = model.vegetation_parameters
     (; snow_band_area_fraction) = model.grid_parameters
-    (; critical_moisture_fraction, wilting_point_fraction) = model.soil_parameters
+    (; critical_moisture, wilting_point) = model.soil_parameters
     soil_moisture = model.soil_variables.moisture
 
     # 1. Configuration
@@ -334,8 +334,8 @@ function update_transpiration!(model::Model)
         water_storage, 
         maximum_water_storage, 
         soil_moisture, 
-        critical_moisture_fraction, 
-        wilting_point_fraction, 
+        critical_moisture, 
+        wilting_point, 
         root_fraction, 
         vegetation_fraction, 
         wet_fraction,
@@ -354,7 +354,7 @@ function update_water_canopy_storage!(model::Model)
     ) = model.canopy_variables
 
     current_month = month(model.clock.time)
-    coverage = @views(model.vegetation_parameters.canopy_coverage[:,:,[current_month],:])
+    coverage = @views(model.vegetation_parameters.canopy_coverage[:,:,current_month:current_month,:])
 
     # 1. Update Throughfall FIRST
     # We calculate the 'excess' logic on the fly using the *current* (old) water_storage.
@@ -379,6 +379,9 @@ function update_total_evapotranspiration!(model)
     (; vegetation_fraction, canopy_coverage) = model.vegetation_parameters
     (; snow_band_area_fraction) = model.grid_parameters
 
+    current_month = month(model.clock.time)
+    coverage = @views(canopy_coverage[:,:,current_month:current_month,:])
+
     # 1. Initialize with Soil Evaporation
     @. total_evapotranspiration = soil_evaporation
 
@@ -388,7 +391,7 @@ function update_total_evapotranspiration!(model)
         for b in 1:size(canopy_evaporation, 3)
             @views @. total_evapotranspiration += (
                 canopy_evaporation[:,:,b,i] * vegetation_fraction[:,:,1,i] + transpiration[:,:,b,i]
-            ) * canopy_coverage[:,:,1,i] * snow_band_area_fraction[:,:,b]
+            ) * coverage[:,:,1,i] * snow_band_area_fraction[:,:,b]
         end
     end
 
