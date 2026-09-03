@@ -10,6 +10,10 @@ struct SurfaceEnergyVariables{M <: AbstractMatrix, T <: AbstractArray}
 
     # Derived/intermediate
     aerodynamic_resistance::T
+
+    # Errors
+    energy_error::M
+    water_error::M
 end
 
 @adapt_structure SurfaceEnergyVariables
@@ -21,7 +25,9 @@ function SurfaceEnergyVariables(grid_dims, tile_dims)
         zeros(Float32, tile_dims),
         zeros(Float32, tile_dims),
         zeros(Float32, grid_dims),
-        zeros(Float32, tile_dims)
+        zeros(Float32, tile_dims),
+        zeros(Float32, grid_dims),
+        zeros(Float32, grid_dims)
     )
 end
 
