@@ -94,6 +94,15 @@ function read_parameters(config::Cfg)
     )
 
     bulk_density = nomissing(ds_params[config.input.names.bulk_density][:,:,:], 0.0)
+    
+    # Quartz content can vary per dataset (e.g., 2D in global, 3D in mekong), so we dynamically check and expand to 3D if needed
+    quartz_raw = ds_params[config.input.names.quartz_content]
+    quartz_3d = if ndims(quartz_raw) == 2
+        repeat(nomissing(quartz_raw[:,:], 0.0), 1, 1, size(bulk_density, 3))
+    else
+        nomissing(quartz_raw[:,:,:], 0.0)
+    end
+
     soil_params = SoilParameters(
         nomissing(ds_params[config.input.names.hydraulic_conductivity][:,:,:], 0.0),
         nomissing(ds_params[config.input.names.depth][:,:,:], 0.0),
@@ -107,7 +116,7 @@ function read_parameters(config::Cfg)
         zeros(eltype(bulk_density), size(bulk_density)),
         nomissing(ds_params[config.input.names.wilting_point_fraction][:,:,:], 0.0),
         zeros(eltype(bulk_density), size(bulk_density)),
-        nomissing(ds_params[config.input.names.quartz_content][:,:,:], 0.0),
+        quartz_3d,
         nomissing(ds_params[config.input.names.bare_roughness][:,:], 0.0),
         bulk_density,
         zeros(eltype(bulk_density), size(bulk_density)),  # calculated later
