@@ -149,6 +149,13 @@ function Model(config_file::AbstractString)
     # Initialize soil moisture and clamp between 0 and maximum_moisture
     @. soil_variables.moisture = clamp(soil_parameters.initial_moisture, 0.0f0, soil_parameters.maximum_moisture)
 
+    # Seed soil column temperature from the annual mean/deep soil temperature parameter,
+    # not 0degC -- otherwise the surface/soil thermal solve starts from a physically wrong
+    # state and biases tsurf, PE and ET from day 1.
+    for layer in axes(soil_variables.temperature, 3)
+        @views soil_variables.temperature[:, :, layer] .= grid_parameters.average_temperature
+    end
+
     writer = start_io_service(config, grid_parameters, year(clock.time), clock.dt)
 
     return Model(
