@@ -241,13 +241,13 @@ function calculate_potential_evaporation!(
 
     EPS = 1.0f-6
 
-    # Pre-allocate arrays
-    slope = ArrayType{Float32}(undef, size(air_temperature))
-    latent_heat = ArrayType{Float32}(undef, size(air_temperature))
-    scale_height = ArrayType{Float32}(undef, size(air_temperature))
-    gamma = ArrayType{Float32}(undef, size(air_temperature))
-    vpd = ArrayType{Float32}(undef, size(air_temperature))
-    air_dens_term = ArrayType{Float32}(undef, size(air_temperature))
+    # Scratch buffers live on the model, not allocated per timestep
+    slope = surface_energy_variables.pe_slope
+    latent_heat = surface_energy_variables.pe_latent_heat
+    scale_height = surface_energy_variables.pe_scale_height
+    gamma = surface_energy_variables.pe_gamma
+    vpd = surface_energy_variables.pe_vpd
+    air_dens_term = surface_energy_variables.pe_air_dens_term
 
     # 2. Pre-calculate 2D Meteorological Terms
     potential_evaporation_precompute!(

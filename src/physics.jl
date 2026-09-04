@@ -14,6 +14,15 @@ struct SurfaceEnergyVariables{M <: AbstractMatrix, T <: AbstractArray}
     # Errors
     energy_error::M
     water_error::M
+
+    # Scratch for the potential evaporation precompute, allocated once and
+    # overwritten every step instead of reallocated per timestep.
+    pe_slope::M
+    pe_latent_heat::M
+    pe_scale_height::M
+    pe_gamma::M
+    pe_vpd::M
+    pe_air_dens_term::M
 end
 
 @adapt_structure SurfaceEnergyVariables
@@ -26,6 +35,12 @@ function SurfaceEnergyVariables(grid_dims, tile_dims)
         zeros(Float32, tile_dims),
         zeros(Float32, grid_dims),
         zeros(Float32, tile_dims),
+        zeros(Float32, grid_dims),
+        zeros(Float32, grid_dims),
+        zeros(Float32, grid_dims),
+        zeros(Float32, grid_dims),
+        zeros(Float32, grid_dims),
+        zeros(Float32, grid_dims),
         zeros(Float32, grid_dims),
         zeros(Float32, grid_dims)
     )
