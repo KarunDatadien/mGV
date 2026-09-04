@@ -135,7 +135,7 @@ function process_daily_outputs(model)
     soil_evaporation = model.soil_variables.evaporation
 
     vegetation_fraction = model.vegetation_parameters.vegetation_fraction # Cv
-    canopy_coverage = @view(model.vegetation_parameters.canopy_coverage[:,:,[current_month],:]) # coverage
+    coverage_this_month = @view(model.vegetation_parameters.canopy_coverage[:,:,[current_month],:])
 
     (; fillvalue_threshold) = model.config
 
@@ -153,7 +153,7 @@ function process_daily_outputs(model)
     kernel_launcher!(
         pe_summed, nr_summed, tr_summed, ce_summed, ws_summed,
         potential_evaporation, net_radiation, transpiration, canopy_evaporation, water_storage,
-        canopy_coverage, vegetation_fraction, snow_band_area_fraction,
+        coverage_this_month, vegetation_fraction, snow_band_area_fraction,
         fillvalue_threshold, NaN32;
         ndrange=(nx, ny)
     )

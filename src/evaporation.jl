@@ -355,14 +355,14 @@ function update_water_canopy_storage!(model::Model)
     ) = model.canopy_variables
 
     current_month = month(model.clock.time)
-    coverage = @views(model.vegetation_parameters.canopy_coverage[:,:,current_month:current_month,:])
+    coverage_this_month = @views(model.vegetation_parameters.canopy_coverage[:,:,current_month:current_month,:])
 
     # 1. Update Throughfall FIRST
     # We calculate the 'excess' logic on the fly using the *current* (old) water_storage.
     # Logic: excess = max(0, (W + P - E) - Wm)
     # Throughfall = (excess * coverage) + (precipitation * (1 - coverage))
-    @. throughfall = (max(0f0, water_storage + band_precipitation - canopy_evaporation - maximum_water_storage) * coverage) +
-                     (band_precipitation * (1f0 - coverage))
+    @. throughfall = (max(0f0, water_storage + band_precipitation - canopy_evaporation - maximum_water_storage) * coverage_this_month) +
+                     (band_precipitation * (1f0 - coverage_this_month))
 
     # 2. Update Water Storage SECOND
     # Now we can safely mutate water_storage.
@@ -381,7 +381,7 @@ function update_total_evapotranspiration!(model)
     (; snow_band_area_fraction) = model.grid_parameters
 
     current_month = month(model.clock.time)
-    coverage = @views(canopy_coverage[:,:,current_month:current_month,:])
+    coverage_this_month = @views(canopy_coverage[:,:,current_month:current_month,:])
 
     # 1. Initialize with Soil Evaporation
     @. total_evapotranspiration = soil_evaporation
@@ -392,7 +392,7 @@ function update_total_evapotranspiration!(model)
         for b in 1:size(canopy_evaporation, 3)
             @views @. total_evapotranspiration += (
                 canopy_evaporation[:,:,b,i] * vegetation_fraction[:,:,1,i] + transpiration[:,:,b,i]
-            ) * coverage[:,:,1,i] * snow_band_area_fraction[:,:,b]
+            ) * coverage_this_month[:,:,1,i] * snow_band_area_fraction[:,:,b]
         end
     end
 
