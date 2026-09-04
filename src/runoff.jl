@@ -257,19 +257,17 @@ end
 
         for step in 1:N_STEPS
             # ==================== LAYER 1 ====================
-            # VIC drives Q12 from layer moisture minus evaporative demand only; the
-            # incoming flux enters storage after Q12 is fixed (VIC runoff.c:200-213).
-            drv_1 = max(sm1 - evap_sub - t1_sub, res1)
-            dpot_1 = calculate_interlayer_drainage(k1 * INV_STEPS, drv_1, max1, res1, exp1)
+            eff_sm1 = max(sm1 + inflow_sub - evap_sub - t1_sub, zero)
+            dpot_1 = calculate_interlayer_drainage(k1 * INV_STEPS, eff_sm1, max1, res1, exp1)
             # Bound drainage dynamically across the fractional scalar
-            d_1 = min(dpot_1, max(sm1 + inflow_sub - evap_sub - t1_sub - res1, zero))
+            d_1 = min(dpot_1, max(eff_sm1 - res1, zero))
 
             sm1 = sm1 + inflow_sub - (evap_sub + t1_sub) - d_1
 
             # ==================== LAYER 2 ====================
-            drv_2 = max(sm2 - t2_sub, res2)
-            dpot_2 = calculate_interlayer_drainage(k2 * INV_STEPS, drv_2, max2, res2, exp2)
-            d_2 = min(dpot_2, max(sm2 + d_1 - t2_sub - res2, zero))
+            eff_sm2 = max(sm2 + d_1 - t2_sub, zero)
+            dpot_2 = calculate_interlayer_drainage(k2 * INV_STEPS, eff_sm2, max2, res2, exp2)
+            d_2 = min(dpot_2, max(eff_sm2 - res2, zero))
 
             sm2 = sm2 + d_1 - t2_sub - d_2
 
@@ -283,11 +281,8 @@ end
             end
 
             # ==================== LAYER 3 ====================
-            # Baseflow likewise uses bottom-layer moisture from before the incoming
-            # drainage is added (VIC runoff.c:308-312).
-            drv_3 = max(sm3 - t3_sub, zero)
-            base_pot = calculate_baseflow(drv_3, res3, max3, _Dsmax, _Ds, _Ws, _c_expt)
             sm3_avail = max(sm3 + d_2 - t3_sub, zero)
+            base_pot = calculate_baseflow(sm3_avail, res3, max3, _Dsmax, _Ds, _Ws, _c_expt)
             b = min(base_pot * INV_STEPS, max(sm3_avail - res3, zero))
             
             sm3 = sm3 + d_2 - t3_sub - b
