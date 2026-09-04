@@ -1,6 +1,7 @@
 start_year = 1979
 end_year = 1980  # data available up to 1984
-enable_snow = false
+enable_routing = true
+enable_snow = true
 
 [output]
 dir         = "../output_data/mekong/"
