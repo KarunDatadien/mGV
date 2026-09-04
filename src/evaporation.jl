@@ -349,7 +349,8 @@ function update_transpiration!(model::Model)
 end
 
 function update_water_canopy_storage!(model::Model)
-    (; precipitation) = model.forcing_variables
+    # Band-adjusted precipitation (Pfactor / AreaFract), not the grid-cell mean
+    (; band_precipitation) = model.snow_variables
     (; water_storage, maximum_water_storage, throughfall, canopy_evaporation
     ) = model.canopy_variables
 
@@ -360,13 +361,13 @@ function update_water_canopy_storage!(model::Model)
     # We calculate the 'excess' logic on the fly using the *current* (old) water_storage.
     # Logic: excess = max(0, (W + P - E) - Wm)
     # Throughfall = (excess * coverage) + (precipitation * (1 - coverage))
-    @. throughfall = (max(0f0, water_storage + precipitation - canopy_evaporation - maximum_water_storage) * coverage) + 
-                     (precipitation * (1f0 - coverage))
+    @. throughfall = (max(0f0, water_storage + band_precipitation - canopy_evaporation - maximum_water_storage) * coverage) +
+                     (band_precipitation * (1f0 - coverage))
 
     # 2. Update Water Storage SECOND
     # Now we can safely mutate water_storage.
     # Logic: clamped new storage
-    @. water_storage = clamp(water_storage + precipitation - canopy_evaporation, 0f0, maximum_water_storage)
+    @. water_storage = clamp(water_storage + band_precipitation - canopy_evaporation, 0f0, maximum_water_storage)
 
     return nothing
 end
