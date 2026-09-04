@@ -138,13 +138,29 @@ class VicCsvDataset:
 
 
 def open_vic(nc_path, csv_path, label):
-    """Open VIC data: prefer CSV if no NetCDF, auto-generate CSV when NetCDF exists."""
+    """Open VIC data: prefer the NetCDF, fall back to the pre-processed CSV.
+
+    The CSV holds VIC's basin average over VIC's own land mask. mGV is averaged over
+    mGV's mask, which is not the same set of cells, so CSV-based scores are NOT
+    comparable -- on Indus the CSV path reported surface runoff NSE -1.04 where the
+    shared-mask value is +1.00. Only the NetCDF path can build a shared mask.
+    """
     if nc_path.exists():
-        print(f"  Found NetCDF for {label}, pre-processing to CSV...")
-        preprocess_vic_to_csv(nc_path, csv_path)
+        if not csv_path.exists():
+            print(f"  Found NetCDF for {label}, building CSV cache...")
+            preprocess_vic_to_csv(nc_path, csv_path)
+        else:
+            print(f"  Found NetCDF for {label} (CSV cache already present)")
         return nc.Dataset(nc_path)
     if csv_path.exists():
-        print(f"  Loading VIC reference from CSV: {csv_path}")
+        print(
+            f"WARNING: {label}: no VIC NetCDF, falling back to the pre-processed CSV.\n"
+            f"         The CSV is averaged over VIC's land mask while mGV is averaged\n"
+            f"         over its own, so NSE/PBIAS below are NOT a like-for-like\n"
+            f"         comparison and may be badly misleading. Restore {nc_path.name}\n"
+            f"         for a valid shared-mask comparison.",
+            file=sys.stderr,
+        )
         return VicCsvDataset(csv_path)
     print(f"WARNING: No VIC data found for {label} (neither NetCDF nor CSV)", file=sys.stderr)
     return None
