@@ -98,7 +98,7 @@ function read_parameters(config::Cfg)
         nomissing(ds_params[config.input.names.hydraulic_conductivity][:,:,:], 0.0),
         nomissing(ds_params[config.input.names.depth][:,:,:], 0.0),
         nomissing(ds_params[config.input.names.initial_moisture][:,:,:], 0.0),
-        nomissing(ds_params[config.input.names.maximum_moisture][:,:,:], 0.0),
+        zeros(eltype(bulk_density), size(bulk_density)),  # calculated later
         nomissing(ds_params[config.input.names.residual_moisture_fraction][:,:,:], 0.0),
         zeros(eltype(bulk_density), size(bulk_density)),
         nomissing(ds_params[config.input.names.critical_moisture_fraction][:,:,:], 0.0),
