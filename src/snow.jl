@@ -587,6 +587,5 @@ function update_snow!(model)
     # Broadcast back to 4D throughfall for downstream soil/runoff modules
     # (they expect throughfall[b,v] = same water input for all veg tiles)
     nx_s, ny_s, nb_s = size(infiltration)
-    nv_s = size(throughfall, 4)
-    throughfall .= repeat(reshape(infiltration, nx_s, ny_s, nb_s, 1), 1, 1, 1, nv_s)
+    throughfall .= reshape(infiltration, nx_s, ny_s, nb_s, 1)
 end

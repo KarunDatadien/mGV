@@ -93,6 +93,7 @@ require.
     clock::Clock   # to keep track of simulation time
     grid_parameters::GridParameters
     vegetation_parameters::VegetationParameters
+    monthly_vegetation_parameters::MonthlyVegetationParameters
     soil_parameters::SoilParameters
     surface_energy_variables::SurfaceEnergyVariables
     canopy_variables::CanopyVariables
@@ -112,7 +113,8 @@ function Model(config_file::AbstractString)
 
     clock = Clock(config)
     forcing_readers, forcing_variables = initialize_forcing(config_file, config)
-    grid_parameters, vegetation_parameters, soil_parameters = read_parameters(config)
+    grid_parameters, vegetation_parameters, soil_parameters, monthly_vegetation_parameters =
+        read_parameters(config)
 
     # Check dim order!
     nx = length(grid_parameters.longitude)
@@ -143,6 +145,12 @@ function Model(config_file::AbstractString)
         routing = adapt(ArrayType, routing)
     end
 
+    # Seed the single-month vegetation buffers with the starting month so the
+    # first timestep sees real parameters rather than zeros.
+    load_monthly_parameters!(
+        vegetation_parameters, monthly_vegetation_parameters, month(clock.time)
+    )
+
     derive_soil_parameters!(soil_parameters)
     convert_nijssen2001_to_arno!(soil_parameters)
 
@@ -164,6 +172,7 @@ function Model(config_file::AbstractString)
         clock,
         grid_parameters,
         vegetation_parameters,
+        monthly_vegetation_parameters,
         soil_parameters,
         surface_energy_variables,
         canopy_variables,
@@ -180,6 +189,13 @@ end
     advance!(model.clock)
 
     update_forcing!(model.clock.time, model.forcing_readers, model.forcing_variables)
+
+    # Refresh the active-month vegetation parameters
+    load_monthly_parameters!(
+        model.vegetation_parameters,
+        model.monthly_vegetation_parameters,
+        month(model.clock.time),
+    )
 
     # Initialize surface temperature on first timestep
     if model.clock.iteration == 1
