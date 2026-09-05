@@ -116,7 +116,6 @@ end
 
 
 function process_daily_outputs(model)
-    current_month = month(model.clock.time)
 
     (;
         surface_temperature, total_evapotranspiration, potential_evaporation, net_radiation
@@ -135,7 +134,7 @@ function process_daily_outputs(model)
     soil_evaporation = model.soil_variables.evaporation
 
     vegetation_fraction = model.vegetation_parameters.vegetation_fraction # Cv
-    coverage_this_month = @view(model.vegetation_parameters.canopy_coverage[:,:,[current_month],:])
+    coverage_this_month = model.vegetation_parameters.canopy_coverage
 
     (; fillvalue_threshold) = model.config
 

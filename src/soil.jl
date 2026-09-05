@@ -218,8 +218,7 @@ function update_soil!(model)
     (; vegetation_fraction, canopy_coverage) = model.vegetation_parameters
     (; snow_band_area_fraction) = model.grid_parameters
     (; throughfall, transpiration_layers) = model.canopy_variables
-    current_month = month(model.clock.time)
-    coverage_this_month = @views(canopy_coverage[:, :, current_month:current_month, :])
+    coverage_this_month = canopy_coverage
 
     calculate_soil_evaporation!(
         evaporation, moisture, maximum_moisture, soil_potential_evaporation,  # Step 2 (snow-blended) PE

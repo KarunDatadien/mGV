@@ -20,7 +20,11 @@ const FORCING_VARS = [
 # Host memory the forcing cache is allowed to occupy across all variables. The
 # number of timesteps held in memory is derived from this and the grid size, so
 # a small basin caches a long block while a large grid falls back to short ones.
-const FORCING_CACHE_BUDGET_BYTES = 256 * 1024^2
+# 256 MiB gave a cache capacity of exactly 1 timestep at global (5 arcmin)
+# resolution -- i.e. no real caching at all, just a refill every single day.
+# 2 GiB (~10 cached days at that resolution) measured 25-38% faster
+# update_forcing! with no further gain going higher.
+const FORCING_CACHE_BUDGET_BYTES = 2 * 1024^3
 
 function getval(data::Any, name::String)
     return getfield(data, Symbol(name))

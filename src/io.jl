@@ -52,7 +52,7 @@ function create_output_zarr(output_path::String, year, nx, ny, nt, nlayers, lat_
     # Initialize the group
     group = zgroup(output_path)
 
-    compressor = Zarr.BloscCompressor(cname="lz4", clevel=1, shuffle=false)
+    compressor = Zarr.BloscCompressor(cname="lz4", clevel=1, shuffle=1)
 
     chunk_2d = (nx, ny, 1)
     chunk_3d_layer = (nx, ny, 1, nlayers)

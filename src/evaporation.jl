@@ -88,21 +88,28 @@ end
     elevation,
     minimum_resistance
 )
-    I = @index(Global)
+    # Cartesian indexing lets each input keep its natural shape instead of
+    # being `repeat`d up to (nx, ny, nbands, nveg), which cost ~13 GiB/step.
+    I = @index(Global, Cartesian)
+    i, j, band, tile = Tuple(I)
 
-    maximum_water_storage[I] = calculate_max_water_storage(lai[I], canopy_coverage[I], fillvalue_threshold)
+    lai_I = lai[i, j, 1, tile]
+
+    maximum_water_storage[I] = calculate_max_water_storage(
+        lai_I, canopy_coverage[i, j, 1, tile], fillvalue_threshold
+    )
 
     canopy_evaporation[I], wet_fraction[I] = canopy_evap_physics(
         water_storage[I],
         maximum_water_storage[I],
         potential_evaporation[I],
         aerodynamic_resistance[I],
-        architectural_resistance[I],
-        precipitation[I],
-        lai[I],
-        air_temperature[I],
-        elevation[I],
-        minimum_resistance[I]
+        architectural_resistance[i, j, 1, tile],
+        precipitation[i, j],
+        lai_I,
+        air_temperature[i, j],
+        elevation[i, j],
+        minimum_resistance[i, j, 1, tile]
     )
 end
 
@@ -112,16 +119,13 @@ function update_canopy_evaporation!(model::Model)
     (; potential_evaporation, aerodynamic_resistance) = model.surface_energy_variables
     (; canopy_evaporation, wet_fraction, water_storage, maximum_water_storage) = model.canopy_variables
     (; lai, canopy_coverage, minimum_resistance, architectural_resistance) = model.vegetation_parameters
-    current_month = month(model.clock.time)
 
-    # Some arrays are (nx, ny, 1, veg) and some are (nx, ny)
-    #  all arrays need the same shape (nx, ny, nbands, nveg) for the GPU kernel
-    nbands = size(maximum_water_storage, 3)
-    nveg = size(maximum_water_storage, 4)
-
+    # Inputs keep their natural shapes -- (nx, ny, nbands, nveg) state,
+    # (nx, ny, 1, nveg) vegetation parameters, (nx, ny) forcings -- and the
+    # kernel broadcasts them via Cartesian indexing.
     canopy_evaporation_kernel!(device_backend)(
-        repeat(@view(lai[:,:,current_month:current_month,:]), outer=[1,1,nbands]),
-        repeat(@view(canopy_coverage[:,:,current_month:current_month,:]), outer=[1,1,nbands]),
+        lai,
+        canopy_coverage,
         model.config.fillvalue_threshold,
         maximum_water_storage,
         canopy_evaporation,
@@ -129,12 +133,12 @@ function update_canopy_evaporation!(model::Model)
         water_storage,
         potential_evaporation,
         aerodynamic_resistance,
-        repeat(architectural_resistance, outer=[1,1,nbands]),
-        repeat(precipitation, outer=[1,1,nbands,nveg]),
-        repeat(air_temperature, outer=[1,1,nbands,nveg]),
-        repeat(elevation, outer=[1,1,nbands,nveg]),
-        repeat(minimum_resistance, outer=[1,1,nbands]),
-        ndrange = length(canopy_evaporation)
+        architectural_resistance,
+        precipitation,
+        air_temperature,
+        elevation,
+        minimum_resistance,
+        ndrange = size(canopy_evaporation)
     )
 
     # 3. Post-Process: Zero out bare soil (last index)
@@ -354,8 +358,7 @@ function update_water_canopy_storage!(model::Model)
     (; water_storage, maximum_water_storage, throughfall, canopy_evaporation
     ) = model.canopy_variables
 
-    current_month = month(model.clock.time)
-    coverage_this_month = @views(model.vegetation_parameters.canopy_coverage[:,:,current_month:current_month,:])
+    coverage_this_month = model.vegetation_parameters.canopy_coverage
 
     # 1. Update Throughfall FIRST
     # We calculate the 'excess' logic on the fly using the *current* (old) water_storage.
@@ -380,8 +383,7 @@ function update_total_evapotranspiration!(model)
     (; vegetation_fraction, canopy_coverage) = model.vegetation_parameters
     (; snow_band_area_fraction) = model.grid_parameters
 
-    current_month = month(model.clock.time)
-    coverage_this_month = @views(canopy_coverage[:,:,current_month:current_month,:])
+    coverage_this_month = canopy_coverage
 
     # 1. Initialize with Soil Evaporation
     @. total_evapotranspiration = soil_evaporation
