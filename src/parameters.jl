@@ -113,7 +113,7 @@ function load_monthly_parameters!(
     )
 
     for (host, device) in field_pairs
-        copyto!(device, view(host, :, :, current_month:current_month, :))
+        copyto!(device, host[:, :, current_month:current_month, :])
     end
 
     monthly.loaded_month = current_month
