@@ -1,11 +1,5 @@
 using NCDatasets.CommonDataModel: CFVariable, MFCFVariable
-using Dates: DateTime
-
-const FORCING_COORDS = [
-    "latitude",
-    "longitude",
-    "time",
-]
+using Dates: DateTime, Millisecond
 
 const FORCING_VARS = [
     "precipitation",
@@ -17,14 +11,13 @@ const FORCING_VARS = [
     "surface_pressure"
 ]
 
-# Host memory the forcing cache is allowed to occupy across all variables. The
-# number of timesteps held in memory is derived from this and the grid size, so
-# a small basin caches a long block while a large grid falls back to short ones.
-# 256 MiB gave a cache capacity of exactly 1 timestep at global (5 arcmin)
-# resolution -- i.e. no real caching at all, just a refill every single day.
-# 2 GiB (~10 cached days at that resolution) measured 25-38% faster
-# update_forcing! with no further gain going higher.
+# Cache RAM budget; cached timesteps = this / grid size. 2 GiB measured 25-38%
+# faster than 256 MiB at global resolution, with no gain going higher.
 const FORCING_CACHE_BUDGET_BYTES = 2 * 1024^3
+
+# Zarr has no date type, so its time axis counts milliseconds from here.
+# Milliseconds are exact for a DateTime, so dates survive the round trip.
+const ZARR_TIME_EPOCH = DateTime(1970, 1, 1)
 
 function getval(data::Any, name::String)
     return getfield(data, Symbol(name))
@@ -44,33 +37,32 @@ end
 
 const ForcingVar = Union{CFVariable, MFCFVariable}
 
-mutable struct ForcingReaders
-    time::ForcingVar
-    latitude::ForcingVar
-    longitude::ForcingVar
-    precipitation::ForcingVar
-    air_temperature::ForcingVar
-    wind_speed::ForcingVar
-    vapor_pressure::ForcingVar
-    shortwave_down::ForcingVar
-    longwave_down::ForcingVar
-    surface_pressure::ForcingVar
-    # Block cache: reading one timestep at a time costs a NetCDF round trip per
-    # variable per step, which dominated the run loop. Instead read a block of
-    # timesteps once and serve the individual steps from host memory.
+"""
+One variable's per-year Zarr stores as a single time axis. `offsets[i]` is the
+run-wide index of the first timestep in `arrays[i]`.
+"""
+struct ZarrForcingVar{A}
+    arrays::Vector{A}
+    offsets::Vector{Int}
+end
+
+mutable struct ForcingReaders{S}
+    # NetCDF variables or Zarr stores; only `load_block!` knows which.
+    sources::Dict{String, S}
+    # Read many timesteps per disk hit, then serve single days from memory.
     times::Vector{DateTime}
     cache::Dict{String, Vector{Matrix{Float32}}}
     cache_start::Int   # index of the first cached timestep, 0 when empty
     cache_len::Int     # number of valid timesteps currently cached
-    capacity::Int      # timesteps per block
-    slice_size::Tuple{Int, Int}
+    capacity::Int      # how many timesteps the cache can hold
+    slice_size::Tuple{Int, Int}  # (nx, ny) of one timestep's grid
 end
 
 """
-Open the forcing input data files to prepare for stepwise data
-loading.
+Open the per-year NetCDF files of every forcing variable as one aggregated
+time series.
 """
-function open_forcing(config_file::AbstractString, cfg::Cfg)
+function open_forcing_netcdf(config_file::AbstractString, cfg::Cfg)
     years = cfg.start_year:cfg.end_year
     var_prefixes = [getval(cfg.input.paths, "$(var)_file") for var in FORCING_VARS]
     files = Vector{String}(undef, length(years))
@@ -87,18 +79,69 @@ function open_forcing(config_file::AbstractString, cfg::Cfg)
         datasets[i] = NCDataset(unique(files), aggdim = "time", deferopen = false)
     end
 
-    vars_dict = Dict()
+    sources = Dict{String, ForcingVar}(
+        var => datasets[i][getval(cfg.input.names, var)]
+        for (i, var) in enumerate(FORCING_VARS)
+    )
 
-    for i in eachindex(FORCING_VARS)
-        var = FORCING_VARS[i]
-        vars_dict[var] = datasets[i][getval(cfg.input.names, var)]
-    end
-    for var in FORCING_COORDS
-        vars_dict[var] = datasets[1][getval(cfg.input.names, var)]
+    times = collect(DateTime, datasets[1][getval(cfg.input.names, "time")][:])
+    nx, ny, _ = size(sources[FORCING_VARS[1]])
+    return sources, times, (nx, ny)
+end
+
+"""
+Open the per-year Zarr stores of every forcing variable, written by
+scripts/convert_forcing_to_zarr.jl.
+"""
+function open_forcing_zarr(config_file::AbstractString, cfg::Cfg)
+    years = cfg.start_year:cfg.end_year
+    config_dir = dirname(config_file)
+
+    store_path(prefix, year) = abspath(joinpath(config_dir, "$(prefix)$(year).zarr"))
+
+    sources = Dict{String, ZarrForcingVar}()
+    times = DateTime[]
+
+    for var in FORCING_VARS
+        prefix = getval(cfg.input.paths, "$(var)_file")
+        groups = map(years) do year
+            path = store_path(prefix, year)
+            isdir(path) || error("Cannot find Zarr forcing store '$path'")
+            zopen(path)
+        end
+
+        arrays = [group[getval(cfg.input.names, var)] for group in groups]
+        offsets = Int[]
+        next = 1
+        for array in arrays
+            push!(offsets, next)
+            next += size(array, 3)
+        end
+        sources[var] = ZarrForcingVar(arrays, offsets)
+
+        # Every variable shares one time axis, so only read it once.
+        if isempty(times)
+            for group in groups
+                append!(times, ZARR_TIME_EPOCH .+ Millisecond.(group["time"][:]))
+            end
+        end
     end
 
-    times = collect(DateTime, vars_dict["time"][:])
-    nx, ny, _ = size(vars_dict[FORCING_VARS[1]])
+    nx, ny, _ = size(first(sources[FORCING_VARS[1]].arrays))
+    return sources, times, (nx, ny)
+end
+
+"""
+Open the forcing input data files to prepare for stepwise data
+loading.
+"""
+function open_forcing(config_file::AbstractString, cfg::Cfg)
+    sources, times, (nx, ny) = if lowercase(cfg.input.forcing_format) == "zarr"
+        open_forcing_zarr(config_file, cfg)
+    else
+        open_forcing_netcdf(config_file, cfg)
+    end
+
     bytes_per_step = nx * ny * sizeof(Float32) * length(FORCING_VARS)
     capacity = clamp(FORCING_CACHE_BUDGET_BYTES ÷ max(bytes_per_step, 1), 1, length(times))
 
@@ -107,16 +150,7 @@ function open_forcing(config_file::AbstractString, cfg::Cfg)
     )
 
     return ForcingReaders(
-        vars_dict["time"],
-        vars_dict["latitude"],
-        vars_dict["longitude"],
-        vars_dict["precipitation"],
-        vars_dict["air_temperature"],
-        vars_dict["wind_speed"],
-        vars_dict["vapor_pressure"],
-        vars_dict["shortwave_down"],
-        vars_dict["longwave_down"],
-        vars_dict["surface_pressure"],
+        sources,
         times,
         cache,
         0,
@@ -138,20 +172,44 @@ function nearest_time_index(times::Vector{DateTime}, time::DateTime)
 end
 
 """
+Read `len` timesteps starting at `start` from a NetCDF variable into `buffers`.
+"""
+function load_block!(buffers::Vector{Matrix{Float32}}, src::ForcingVar, start::Int, len::Int)
+    raw = src[:, :, start:(start + len - 1)]
+    # A declared _FillValue yields Union{Missing,Float32}; the model wants NaN.
+    block = raw isa Array{Float32, 3} ? raw : Array{Float32, 3}(coalesce.(raw, NaN32))
+    for k in 1:len
+        copyto!(buffers[k], view(block, :, :, k))
+    end
+    return nothing
+end
+
+"""
+Read `len` timesteps from `start` into `buffers`, crossing year boundaries.
+"""
+function load_block!(buffers::Vector{Matrix{Float32}}, src::ZarrForcingVar, start::Int, len::Int)
+    nx, ny = size(first(buffers))
+    for k in 1:len
+        global_index = start + k - 1
+        i = searchsortedlast(src.offsets, global_index)
+        local_index = global_index - src.offsets[i] + 1
+        # One chunk per timestep, so this decompresses straight into the cache.
+        Zarr.readblock!(
+            reshape(buffers[k], nx, ny, 1),
+            src.arrays[i],
+            CartesianIndices((1:nx, 1:ny, local_index:local_index)),
+        )
+    end
+    return nothing
+end
+
+"""
 Load the block of timesteps starting at `start` into the host cache.
 """
 function fill_forcing_cache!(readers::ForcingReaders, start::Int)
     len = min(readers.capacity, length(readers.times) - start + 1)
-    stop = start + len - 1
     for var in FORCING_VARS
-        raw = getval(readers, var)[:, :, start:stop]
-        # A declared _FillValue makes NCDatasets hand back a Union{Missing,Float32}
-        # array; the rest of the model represents absent data as NaN.
-        block = raw isa Array{Float32, 3} ? raw : Array{Float32, 3}(coalesce.(raw, NaN32))
-        buffers = readers.cache[var]
-        for k in 1:len
-            copyto!(buffers[k], view(block, :, :, k))
-        end
+        load_block!(readers.cache[var], readers.sources[var], start, len)
     end
     readers.cache_start = start
     readers.cache_len = len

@@ -76,6 +76,9 @@ end
 end
 
 @option "input" struct InputCfg
+    # "netcdf" reads the per-year `<prefix><year>.nc` files, "zarr" the
+    # `<prefix><year>.zarr` stores written by scripts/convert_forcing_to_zarr.jl.
+    forcing_format::String = "netcdf"
     paths::InputPaths
     names::InputNames
 end
