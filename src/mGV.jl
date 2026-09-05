@@ -101,7 +101,7 @@ require.
     snow_variables::SnowVariables
     forcing_variables::ForcingVariables
     forcing_readers::ForcingReaders
-    routing::RoutingState
+    routing::Union{RoutingState, Nothing}  # nothing when routing is disabled
     writer::Union{OutputWriter, Nothing} # writes model output
 end
 
@@ -130,7 +130,9 @@ function Model(config_file::AbstractString)
     canopy_variables = CanopyVariables(tile_dims)
     soil_variables = SoilVariables(grid_dims, soil_dims)
     snow_variables = SnowVariables(nx, ny, nbands, nveg)
-    routing = RoutingState(config, grid_parameters.elevation)
+    # Only build routing state when it is actually used; otherwise the run
+    # would require a routing parameter file it never reads.
+    routing = config.enable_routing ? RoutingState(config, grid_parameters.elevation) : nothing
 
     # Move data to backend during model initialization
     if backend_name != "CPU"
@@ -142,7 +144,9 @@ function Model(config_file::AbstractString)
         soil_variables = adapt(ArrayType, soil_variables)
         snow_variables = adapt(ArrayType, snow_variables)
         forcing_variables = adapt(ArrayType, forcing_variables)
-        routing = adapt(ArrayType, routing)
+        if !isnothing(routing)
+            routing = adapt(ArrayType, routing)
+        end
     end
 
     # Seed the single-month vegetation buffers with the starting month so the
@@ -226,7 +230,9 @@ end
 
     # run routing
     #  Note: fix violation_counter
-    update_routing!(model)
+    if model.config.enable_routing
+        update_routing!(model)
+    end
 
     update_soil_conductivity!(model)
     update_soil_volumetric_heat_capacity!(model)
